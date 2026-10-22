@@ -17,3 +17,16 @@ Configure `.env` (never commit it). Run:
 ```
 
 Open `http://localhost:8000` for the UI.
+
+## Publish to GitHub
+
+1. Create an **empty** private repo on GitHub (e.g. `Alirezaanorouzi/liara-deployer`) — no README/license.
+2. From the project root:
+
+```powershell
+.\scripts\push_to_github.ps1
+```
+
+3. In the deploy UI, pick **`Alirezaanorouzi/liara-deployer`** (or your repo name) for **Deploy to Liara**.
+
+Your `GITHUB_TOKEN` must allow **push** to that repo. If repo creation via API fails, create the repo in the browser and run the script above.
