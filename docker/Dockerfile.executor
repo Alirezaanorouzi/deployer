@@ -1,0 +1,8 @@
+FROM node:22-alpine
+
+RUN apk add --no-cache git ca-certificates bash \
+    && npm install -g @liara/cli@latest
+
+WORKDIR /workspace
+ENTRYPOINT []
+CMD ["sh"]

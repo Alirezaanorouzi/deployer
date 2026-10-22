@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Liara DevOps Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0e14;
+      --card: #151b26;
+      --accent: #00d4aa;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --term: #0d1117;
+      --sidebar-w: 400px;
+      --font-fa: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    .sub { color: var(--muted); font-size: 0.85rem; margin: 0.25rem 0 0; }
+    .app-shell { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    .main-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+    .left-panel {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      overflow: hidden;
+    }
+    .left-top { flex-shrink: 0; }
+    .right-sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      border-left: 1px solid #2d3a4f;
+      background: #0d1219;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+    @media (max-width: 900px) {
+      html, body { overflow: auto; height: auto; }
+      .app-shell { height: auto; min-height: 100vh; }
+      .main-layout { flex-direction: column; overflow: visible; }
+      .right-sidebar { width: 100%; border-left: none; border-top: 1px solid #2d3a4f; min-height: 50vh; }
+      .left-panel { overflow: visible; }
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: var(--card); border-radius: 12px; padding: 1rem; }
+    .card h2 { font-size: 0.95rem; margin: 0 0 0.75rem; color: var(--accent); }
+    label { font-size: 0.8rem; color: var(--muted); display: block; margin-top: 0.5rem; }
+    input, select, textarea { width: 100%; background: var(--term); border: 1px solid #2d3a4f; color: var(--text); border-radius: 8px; padding: 0.5rem; margin-top: 0.2rem; font-family: inherit; font-size: 0.9rem; }
+    button { background: var(--accent); color: #042; border: none; border-radius: 8px; padding: 0.6rem 1.1rem; font-weight: 700; cursor: pointer; margin-top: 0.6rem; margin-right: 0.4rem; }
+    button.secondary { background: #2d3a4f; color: var(--text); }
+    button.warn { background: #ffc857; color: #222; }
+    #terminal {
+      background: var(--term);
+      border: 1px solid #2d3a4f;
+      border-radius: 10px;
+      padding: 0.75rem;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      margin-top: 0.5rem;
+      font-family: ui-monospace, monospace;
+    }
+    .success-link { display: none; margin-top: 1rem; padding: 1rem; background: #0d2818; border: 1px solid var(--accent); border-radius: 10px; text-align: center; }
+    .success-link a { color: var(--accent); font-size: 1.05rem; font-weight: 700; text-decoration: none; word-break: break-all; }
+    .approval-bar { display: none; margin-top: 0.75rem; padding: 0.75rem; background: #2a2210; border: 1px solid #ffc857; border-radius: 8px; }
+    .chat-sidebar {
+      padding: 0;
+      font-family: var(--font-fa);
+    }
+    .chat-header { display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1rem; border-bottom: 1px solid #252b36; }
+    .chat-title { font-size: 0.9rem; font-weight: 600; color: var(--text); }
+    .chat-clear { background: transparent; color: var(--muted); font-size: 0.75rem; font-weight: 500; padding: 0.35rem 0.5rem; margin: 0; border-radius: 6px; }
+    .chat-clear:hover { color: var(--text); background: #1a2230; }
+    .chat-thread { flex: 1; overflow-y: auto; padding: 1rem 1rem 0.5rem; display: flex; flex-direction: column; gap: 1.25rem; min-height: 120px; }
+    .chat-thread-empty { color: var(--muted); font-size: 0.85rem; line-height: 1.5; padding: 0.25rem 0; }
+    .chat-user-bubble {
+      align-self: stretch;
+      background: #1a1f2a;
+      border: 1px solid #2a3344;
+      border-radius: 12px;
+      padding: 0.65rem 0.85rem;
+      font-family: var(--font-fa);
+      font-size: 0.92rem;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+      direction: auto;
+      unicode-bidi: plaintext;
+      text-align: start;
+    }
+    .chat-agent-block {
+      font-family: var(--font-fa);
+      font-size: 0.92rem;
+      font-weight: 400;
+      line-height: 1.75;
+      color: #d4dce8;
+      direction: rtl;
+      text-align: right;
+      unicode-bidi: plaintext;
+    }
+    .chat-agent-block[dir="ltr"] { direction: ltr; text-align: left; }
+    .chat-agent-block p { margin: 0 0 0.5rem; }
+    .chat-agent-block p:last-child { margin-bottom: 0; }
+    .chat-agent-block a { color: #6eb5ff; text-decoration: none; }
+    .chat-agent-block a:hover { text-decoration: underline; }
+    .chat-meta {
+      font-size: 0.72rem;
+      color: #6a7a92;
+      margin-top: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      direction: ltr;
+      justify-content: flex-end;
+    }
+    .chat-meta button.copy-btn { background: transparent; color: var(--muted); padding: 0.15rem 0.35rem; margin: 0; font-size: 0.7rem; font-weight: 500; border: 1px solid #2d3a4f; }
+    .chat-meta button.copy-btn:hover { color: var(--text); }
+    .chat-thinking { color: var(--muted); font-style: italic; }
+    .chat-live-indicator { font-size: 0.72rem; color: #6eb5ff; margin-top: 0.35rem; }
+    .chat-agent-block strong { color: #eef3fa; font-weight: 600; font-family: var(--font-fa); }
+    .chat-thinking,
+    .chat-live-indicator,
+    .chat-thread-empty {
+      font-family: var(--font-fa);
+    }
+    .chat-composer { border-top: 1px solid #252b36; padding: 0.75rem 1rem 1rem; margin-top: auto; background: #0d1219; }
+    .chat-composer textarea {
+      min-height: 72px;
+      max-height: 160px;
+      resize: none;
+      border-radius: 12px;
+      padding: 0.65rem 0.75rem;
+      font-family: var(--font-fa);
+      font-size: 0.92rem;
+      line-height: 1.65;
+      margin-top: 0;
+      direction: auto;
+      unicode-bidi: plaintext;
+      text-align: start;
+    }
+    .composer-row { display: flex; align-items: center; justify-content: space-between; margin-top: 0.5rem; gap: 0.5rem; }
+    .composer-hint { font-size: 0.7rem; color: #5c6b80; }
+    .chat-composer #chatSend { margin: 0; padding: 0.45rem 1rem; font-size: 0.85rem; border-radius: 8px; }
+    .terminal-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      margin: 0;
+    }
+    .terminal-card h2 { flex-shrink: 0; }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <div class="main-layout">
+      <main class="left-panel">
+        <div class="left-top grid">
+          <div class="card">
+            <h2>Deploy pipeline</h2>
+            <label>GitHub repository</label>
+            <select id="ghRepo"><option value="">Loading…</option></select>
+            <label>Monorepo subpath (optional)</label>
+            <input id="ghSubpath" placeholder="e.g. apps/web" />
+            <label>Liara app name (optional)</label>
+            <input id="liaraApp" placeholder="auto from repo name" />
+            <label>Workspace API key</label>
+            <input id="apiKey" value="dev-local-key" />
+            <button id="deployBtn">Deploy to Liara</button>
+            <button class="secondary" id="refreshBtn">Refresh repos</button>
+            <p id="runMeta" class="sub"></p>
+          </div>
+          <div class="card">
+            <h2>Run state</h2>
+            <p>State: <strong id="runState">—</strong></p>
+            <div class="approval-bar" id="approvalBar">
+              <p><strong>Approval required</strong> — create Liara app and deploy.</p>
+              <button class="warn" id="approveBtn">Approve &amp; continue</button>
+            </div>
+            <div class="success-link" id="successBox">
+              <p>Your site is ready</p>
+              <a id="siteLink" href="#" target="_blank" rel="noopener">Open site</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="card terminal-card">
+          <h2>Terminal</h2>
+          <div id="terminal"></div>
+        </div>
+      </main>
+
+      <aside class="right-sidebar chat-sidebar">
+        <div class="chat-header">
+          <span class="chat-title">Agent</span>
+          <button type="button" class="chat-clear" id="chatClear" title="Clear conversation">Clear</button>
+        </div>
+        <div class="chat-thread" id="chatThread"></div>
+        <div class="chat-composer">
+          <textarea id="message" rows="3" placeholder="Deploy, logs, health checks…"></textarea>
+          <div class="composer-row">
+            <span class="composer-hint">Enter to send · Shift+Enter for newline</span>
+            <button type="button" id="chatSend">Send</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    let currentRunId = null;
+    let eventSource = null;
+    let runPollTimer = null;
+    let chatPendingTurn = null;
+    let agentStreamActive = false;
+    let agentThinkingText = '';
+    const CHAT_STORAGE_KEY = 'deployer_chat_v1';
+    const CHAT_MAX_TURNS = 20;
+
+    const apiKey = () => document.getElementById('apiKey').value;
+    const headers = () => ({ 'Content-Type': 'application/json', 'X-API-Key': apiKey() });
+
+    function term(line) {
+      const el = document.getElementById('terminal');
+      el.textContent += line + '\n';
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function clearTerm() {
+      document.getElementById('terminal').textContent = '';
+    }
+
+    function loadChatMemory() {
+      try {
+        const raw = sessionStorage.getItem(CHAT_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch (_) { return []; }
+    }
+
+    function saveChatMemory(items) {
+      sessionStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(items.slice(-CHAT_MAX_TURNS)));
+    }
+
+    function formatTimeAgo(ts) {
+      const s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 15) return 'just now';
+      if (s < 60) return s + 's ago';
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + 'm ago';
+      return Math.floor(m / 60) + 'h ago';
+    }
+
+    function formatDuration(ms) {
+      if (!ms || ms < 500) return 'a moment';
+      const s = Math.round(ms / 1000);
+      if (s < 60) return s + 's';
+      const m = Math.floor(s / 60);
+      const rs = s % 60;
+      return rs ? m + 'm ' + rs + 's' : m + 'm';
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function linkifyText(text) {
+      const escaped = escapeHtml(text);
+      return escaped.replace(
+        /(https?:\/\/[^\s<]+)/g,
+        '<a href="$1" target="_blank" rel="noopener">$1</a>'
+      );
+    }
+
+    function hasPersianOrArabic(text) {
+      return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text || '');
+    }
+
+    function applyAgentDirection(el, text) {
+      if (!el) return;
+      if (hasPersianOrArabic(text)) {
+        el.setAttribute('dir', 'rtl');
+        el.removeAttribute('data-ltr');
+      } else {
+        el.setAttribute('dir', 'ltr');
+        el.setAttribute('data-ltr', '1');
+      }
+    }
+
+    function formatAgentText(text) {
+      return linkifyText(text).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    }
+
+    function renderChatThread() {
+      const thread = document.getElementById('chatThread');
+      const memory = loadChatMemory();
+      thread.innerHTML = '';
+      if (!memory.length && !chatPendingTurn) {
+        thread.innerHTML = '<div class="chat-thread-empty">Ask me to deploy from GitHub, check logs, or diagnose an incident. I remember this session’s last few messages.</div>';
+        return;
+      }
+      memory.forEach((turn, idx) => {
+        if (turn.user) {
+          const u = document.createElement('div');
+          u.className = 'chat-user-bubble';
+          u.setAttribute('dir', 'auto');
+          u.textContent = turn.user;
+          thread.appendChild(u);
+        }
+        if (turn.assistant != null) {
+          const block = document.createElement('div');
+          block.className = 'chat-agent-block';
+          const body = document.createElement('div');
+          if (turn.pending) {
+            body.className = 'chat-thinking';
+            body.textContent = turn.assistant;
+          } else {
+            body.style.whiteSpace = 'pre-wrap';
+            body.innerHTML = formatAgentText(turn.assistant);
+            applyAgentDirection(body, turn.assistant);
+          }
+          block.appendChild(body);
+          applyAgentDirection(block, turn.assistant);
+          if (turn.agentLive && agentStreamActive && agentThinkingText) {
+            const live = document.createElement('div');
+            live.className = 'chat-live-indicator';
+            live.textContent = agentThinkingText;
+            block.appendChild(live);
+          } else if (turn.agentLive && agentStreamActive) {
+            const live = document.createElement('div');
+            live.className = 'chat-live-indicator';
+            live.textContent = 'Agent is working…';
+            block.appendChild(live);
+          }
+          const meta = document.createElement('div');
+          meta.className = 'chat-meta';
+          const label = turn.durationMs
+            ? 'Worked for ' + formatDuration(turn.durationMs)
+            : (turn.pending || (turn.agentLive && agentStreamActive) ? 'Working…' : '');
+          meta.innerHTML = '<span>' + (label ? label + ' · ' : '') + formatTimeAgo(turn.at || Date.now()) + '</span>';
+          if (!turn.pending && turn.assistant) {
+            const copy = document.createElement('button');
+            copy.type = 'button';
+            copy.className = 'copy-btn';
+            copy.textContent = 'Copy';
+            copy.onclick = () => navigator.clipboard.writeText(turn.assistant);
+            meta.appendChild(copy);
+          }
+          block.appendChild(meta);
+          thread.appendChild(block);
+        }
+      });
+      if (chatPendingTurn && (memory.length === 0 || memory[memory.length - 1] !== chatPendingTurn)) {
+        if (chatPendingTurn.user) {
+          const u = document.createElement('div');
+          u.className = 'chat-user-bubble';
+          u.setAttribute('dir', 'auto');
+          u.textContent = chatPendingTurn.user;
+          thread.appendChild(u);
+        }
+        const block = document.createElement('div');
+        block.className = 'chat-agent-block';
+        block.innerHTML = '<div class="chat-thinking">' + escapeHtml(chatPendingTurn.assistant || 'Thinking…') + '</div>';
+        thread.appendChild(block);
+      }
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function appendChatTurn(userText) {
+      const memory = loadChatMemory();
+      const turn = { user: userText, assistant: 'Thinking…', pending: true, at: Date.now(), startedAt: Date.now() };
+      memory.push(turn);
+      saveChatMemory(memory);
+      chatPendingTurn = null;
+      renderChatThread();
+      return memory.length - 1;
+    }
+
+    function finishChatTurn(assistantText, extra) {
+      const memory = loadChatMemory();
+      for (let i = memory.length - 1; i >= 0; i--) {
+        if (memory[i].pending) {
+          memory[i].pending = false;
+          memory[i].assistant = assistantText || memory[i].assistant;
+          memory[i].at = Date.now();
+          memory[i].durationMs = extra?.durationMs ?? (Date.now() - (memory[i].startedAt || memory[i].at));
+          if (extra) Object.assign(memory[i], extra);
+          saveChatMemory(memory);
+          renderChatThread();
+          return;
+        }
+      }
+      if (!assistantText || !memory.length) return;
+      const last = memory[memory.length - 1];
+      if (!last.pending && last.user) {
+        last.assistant = assistantText;
+        last.at = Date.now();
+        if (extra?.durationMs) last.durationMs = extra.durationMs;
+        saveChatMemory(memory);
+        renderChatThread();
+      }
+    }
+
+    function patchLatestAssistant(text) {
+      const memory = loadChatMemory();
+      for (let i = memory.length - 1; i >= 0; i--) {
+        if (memory[i].assistant != null) {
+          const base = memory[i].assistant === 'Thinking…' ? '' : memory[i].assistant;
+          memory[i].assistant = text || base;
+          if (!memory[i].pending) memory[i].at = Date.now();
+          saveChatMemory(memory);
+          renderChatThread();
+          return;
+        }
+      }
+    }
+
+    function isStreamingSkill(skillId) {
+      return !!skillId && (skillId.startsWith('liara.') || skillId === 'agent.summarize');
+    }
+
+    function appendStreamTokenToLatestAssistant(delta, streamStart, newBlock) {
+      if (!delta && !streamStart) return;
+      const memory = loadChatMemory();
+      for (let i = memory.length - 1; i >= 0; i--) {
+        if (memory[i].assistant != null) {
+          memory[i].pending = false;
+          memory[i].agentLive = true;
+          memory[i].streaming = true;
+          let base = memory[i].assistant === 'Thinking…' ? '' : memory[i].assistant;
+          if (streamStart) {
+            if (newBlock && base) base += '\n\n';
+            memory[i].assistant = base + (delta || '');
+          } else {
+            memory[i].assistant = base + (delta || '');
+          }
+          memory[i].at = Date.now();
+          saveChatMemory(memory);
+          renderChatThread();
+          return;
+        }
+      }
+    }
+
+    function appendToLatestAssistant(text) {
+      if (!text) return;
+      const memory = loadChatMemory();
+      for (let i = memory.length - 1; i >= 0; i--) {
+        if (memory[i].assistant != null) {
+          memory[i].pending = false;
+          memory[i].agentLive = true;
+          const base = memory[i].assistant === 'Thinking…' ? '' : memory[i].assistant;
+          memory[i].assistant = base ? (base + '\n\n' + text).trim() : text;
+          memory[i].at = Date.now();
+          saveChatMemory(memory);
+          renderChatThread();
+          return;
+        }
+      }
+    }
+
+    function setAgentThinking(text) {
+      agentThinkingText = text || '';
+      renderChatThread();
+    }
+
+    function chatHistoryForApi() {
+      const memory = loadChatMemory();
+      const out = [];
+      memory.forEach(turn => {
+        if (turn.pending) return;
+        if (turn.user) out.push({ role: 'user', content: turn.user });
+        if (turn.assistant && turn.assistant !== 'Thinking…') {
+          out.push({ role: 'assistant', content: turn.assistant });
+        }
+      });
+      return out.slice(-12);
+    }
+
+    renderChatThread();
+
+    async function loadRepos() {
+      const res = await fetch('/integrations/github/repos', { headers: { 'X-API-Key': apiKey() } });
+      const data = await res.json();
+      const sel = document.getElementById('ghRepo');
+      sel.innerHTML = '';
+      (data.repos || []).forEach(r => {
+        const o = document.createElement('option');
+        o.value = r.full_name;
+        o.textContent = r.full_name;
+        sel.appendChild(o);
+      });
+    }
+
+    function connectStream(runId) {
+      if (eventSource) eventSource.close();
+      agentStreamActive = true;
+      agentThinkingText = '';
+      const url = '/runs/' + runId + '/stream?api_key=' + encodeURIComponent(apiKey());
+      eventSource = new EventSource(url);
+      eventSource.addEventListener('connected', () => term('— stream connected —'));
+      eventSource.addEventListener('log_line', e => {
+        const d = JSON.parse(e.data);
+        term(d.line || '');
+      });
+      eventSource.addEventListener('step_start', e => {
+        const d = JSON.parse(e.data);
+        term('>>> step ' + d.name);
+      });
+      eventSource.addEventListener('tool_call', e => {
+        const d = JSON.parse(e.data);
+        term('>>> tool ' + (d.tool_id || ''));
+      });
+      eventSource.addEventListener('agent_message', e => {
+        const d = JSON.parse(e.data);
+        const text = d.text || '';
+        if (d.stream) {
+          appendStreamTokenToLatestAssistant(text, !!d.stream_start, !!d.new_block);
+          return;
+        }
+        if (d.append) appendToLatestAssistant(text);
+        else if (loadChatMemory().some(t => t.pending)) finishChatTurn(text, { agentLive: true });
+        else if (text) {
+          patchLatestAssistant(text);
+          const m = loadChatMemory();
+          if (m.length) { m[m.length - 1].agentLive = true; saveChatMemory(m); renderChatThread(); }
+        }
+        if (text && !d.stream) term('Agent: ' + text);
+      });
+      eventSource.addEventListener('agent_thinking', e => {
+        const d = JSON.parse(e.data);
+        setAgentThinking(d.text || '');
+      });
+      eventSource.addEventListener('approval_required', e => {
+        const d = JSON.parse(e.data);
+        term('');
+        term('*** APPROVAL REQUIRED: ' + (d.message || '') + ' ***');
+        document.getElementById('approvalBar').style.display = 'block';
+        appendToLatestAssistant('Approval required — use **Approve & continue** on the left panel.');
+      });
+      eventSource.addEventListener('site_url', e => {
+        const d = JSON.parse(e.data);
+        showSite(d.url);
+      });
+      eventSource.addEventListener('succeeded', e => {
+        const d = JSON.parse(e.data);
+        if (d.site_url) showSite(d.site_url);
+        const m = loadChatMemory();
+        if (d.summary && m.length) {
+          const last = m[m.length - 1];
+          if (!last.streaming && (!last.assistant || last.assistant === 'Thinking…' || last.pending)) {
+            appendToLatestAssistant(d.summary);
+          }
+        }
+        agentStreamActive = false;
+        agentThinkingText = '';
+        if (m.length) {
+          m[m.length - 1].agentLive = false;
+          m[m.length - 1].pending = false;
+          m[m.length - 1].streaming = false;
+          saveChatMemory(m);
+        }
+        document.getElementById('runState').textContent = 'succeeded';
+        renderChatThread();
+        pollRun(runId);
+      });
+      eventSource.addEventListener('run_error', e => {
+        try {
+          const d = JSON.parse(e.data);
+          term('ERROR: ' + (d.message || ''));
+          appendToLatestAssistant('Run failed: ' + (d.message || 'unknown error'));
+        } catch (_) {}
+        agentStreamActive = false;
+        agentThinkingText = '';
+        document.getElementById('runState').textContent = 'failed';
+        renderChatThread();
+        pollRun(runId);
+      });
+    }
+
+    function showSite(url) {
+      if (!url) return;
+      const box = document.getElementById('successBox');
+      const a = document.getElementById('siteLink');
+      a.href = url;
+      a.textContent = url;
+      box.style.display = 'block';
+    }
+
+    const TERMINAL_RUN_STATES = new Set(['succeeded', 'failed', 'cancelled']);
+
+    function stopRunPolling() {
+      if (runPollTimer) {
+        clearInterval(runPollTimer);
+        runPollTimer = null;
+      }
+    }
+
+    function startRunPolling(runId) {
+      stopRunPolling();
+      runPollTimer = setInterval(() => pollRun(runId), 3000);
+    }
+
+    async function pollRun(runId) {
+      const res = await fetch('/runs/' + runId, { headers: { 'X-API-Key': apiKey() } });
+      const run = await res.json();
+      document.getElementById('runState').textContent = run.state;
+      if (run.site_url) showSite(run.site_url);
+      const mem = loadChatMemory();
+      const lastTurn = mem.length ? mem[mem.length - 1] : null;
+      if (run.agent_message && !agentStreamActive && !(lastTurn && lastTurn.streaming)) {
+        patchLatestAssistant(run.agent_message);
+      }
+      if (run.state === 'awaiting_approval') {
+        document.getElementById('approvalBar').style.display = 'block';
+      }
+      if (TERMINAL_RUN_STATES.has(run.state)) stopRunPolling();
+      return run;
+    }
+
+    document.getElementById('refreshBtn').onclick = loadRepos;
+    loadRepos();
+
+    document.getElementById('deployBtn').onclick = async () => {
+      const repo = document.getElementById('ghRepo').value;
+      if (!repo) return alert('Select a repository');
+      clearTerm();
+      document.getElementById('approvalBar').style.display = 'none';
+      document.getElementById('successBox').style.display = 'none';
+      const body = {
+        repo,
+        subpath: document.getElementById('ghSubpath').value.trim(),
+        liara_app_name: document.getElementById('liaraApp').value.trim() || null,
+      };
+      const res = await fetch('/runs/pipeline', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+      const run = await res.json();
+      currentRunId = run.id;
+      document.getElementById('runMeta').textContent = 'Run ' + run.id;
+      document.getElementById('runState').textContent = run.state;
+      term('Pipeline started for ' + repo);
+      connectStream(run.id);
+      startRunPolling(run.id);
+      setTimeout(() => pollRun(run.id), 1500);
+    };
+
+    document.getElementById('approveBtn').onclick = async () => {
+      if (!currentRunId) return;
+      document.getElementById('approvalBar').style.display = 'none';
+      term('— approved — continuing deploy…');
+      const res = await fetch('/runs/' + currentRunId + '/approve', { method: 'POST', headers: { 'X-API-Key': apiKey() } });
+      const run = await res.json();
+      document.getElementById('runState').textContent = run.state;
+      startRunPolling(currentRunId);
+    };
+
+    async function sendChat() {
+      const input = document.getElementById('message');
+      const userText = input.value.trim();
+      if (!userText) return;
+      input.value = '';
+      appendChatTurn(userText);
+      clearTerm();
+      const started = Date.now();
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          message: userText,
+          app: document.getElementById('liaraApp').value.trim() || null,
+          target_env: 'staging',
+          history: chatHistoryForApi(),
+        }),
+      });
+      const run = await res.json();
+      if (!res.ok) {
+        const err = typeof run.detail === 'string' ? run.detail : JSON.stringify(run.detail || run);
+        finishChatTurn('Something went wrong: ' + err);
+        term('Error: ' + err);
+        return;
+      }
+      currentRunId = run.id;
+      connectStream(run.id);
+      if (run.agent_message && !isStreamingSkill(run.skill_id)) {
+        finishChatTurn(run.agent_message, { durationMs: Date.now() - started, agentLive: true });
+      }
+      term('Run ' + run.id + ' — ' + (run.skill_id || ''));
+      document.getElementById('runState').textContent = run.state;
+      document.getElementById('runMeta').textContent = 'Run ' + run.id;
+      if (run.state === 'awaiting_approval') {
+        document.getElementById('approvalBar').style.display = 'block';
+      }
+      startRunPolling(run.id);
+      pollRun(run.id);
+    }
+
+    document.getElementById('chatSend').onclick = sendChat;
+    document.getElementById('message').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChat();
+      }
+    });
+    document.getElementById('chatClear').onclick = () => {
+      if (!confirm('Clear this chat thread?')) return;
+      sessionStorage.removeItem(CHAT_STORAGE_KEY);
+      chatPendingTurn = null;
+      renderChatThread();
+    };
+  </script>
+</body>
+</html>
