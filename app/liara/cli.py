@@ -22,8 +22,9 @@ class CliResult:
 
 
 class LiaraCli:
-    def __init__(self, api_token: str) -> None:
+    def __init__(self, api_token: str, team_id: str | None = None) -> None:
         self._token = api_token
+        self._team_id = (team_id or "").strip() or None
 
     def _env(self) -> dict[str, str]:
         env: dict[str, str] = {}
@@ -46,6 +47,13 @@ class LiaraCli:
         if asyncio.iscoroutine(result):
             await result
 
+    def _argv(self, *args: str) -> tuple[str, ...]:
+        """Liara expects `liara deploy ... --team-id ID`, not `liara --team-id ID deploy`."""
+        if not self._team_id or not args:
+            return args
+        subcommand, *rest = args
+        return (subcommand, *rest, "--team-id", self._team_id)
+
     async def run(
         self,
         *args: str,
@@ -54,6 +62,7 @@ class LiaraCli:
         on_line: OnLine | None = None,
         sandbox_run_id: str | None = None,
     ) -> CliResult:
+        args = self._argv(*args)
         if sandbox_run_id:
             workdir = host_path_to_container(sandbox_run_id, cwd or ".")
             argv = ["liara", *args]

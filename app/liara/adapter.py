@@ -33,6 +33,11 @@ from app.liara.platform import (
     sanitize_release,
     settings_snapshot,
 )
+from app.liara.create_app import (
+    normalize_liara_app_id,
+    validate_app_id,
+    validate_platform,
+)
 from app.liara.usage import build_usage_summary, usage_summary_text
 
 
@@ -49,20 +54,49 @@ class LiaraAdapter:
         settings = get_settings()
         self._token = api_token or settings.liara_api_token
         self._base = settings.liara_api_base.rstrip("/")
-        self._cli = LiaraCli(self._token)
+        self._team_id = (settings.liara_team_id or "").strip() or None
+        self._cli = LiaraCli(self._token, team_id=self._team_id)
         self._run_id = run_id
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}
 
-    async def _get(self, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
-        async with httpx.AsyncClient(timeout=45) as client:
-            return await client.get(f"{self._base}{path}", headers=self._headers(), params=params)
+    def _team_query(self, *, enabled: bool = True) -> dict[str, str]:
+        if enabled and self._team_id:
+            return {"teamID": self._team_id}
+        return {}
 
-    async def _post_json(self, path: str, body: dict[str, Any] | None = None) -> httpx.Response:
+    def _team_context(self) -> bool:
+        return bool(self._team_id)
+
+    async def _get(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        team_scope: bool = True,
+    ) -> httpx.Response:
+        merged = {**(params or {}), **self._team_query(enabled=team_scope)}
+        async with httpx.AsyncClient(timeout=45) as client:
+            return await client.get(f"{self._base}{path}", headers=self._headers(), params=merged)
+
+    async def _post_json(
+        self,
+        path: str,
+        body: dict[str, Any] | None = None,
+        *,
+        team_scope: bool = True,
+    ) -> httpx.Response:
         headers = {**self._headers(), "Content-Type": "application/json"}
+        payload = dict(body or {})
+        params = self._team_query(enabled=team_scope)
         async with httpx.AsyncClient(timeout=90) as client:
-            return await client.post(f"{self._base}{path}", headers=headers, json=body or {})
+            return await client.post(
+                f"{self._base}{path}",
+                headers=headers,
+                json=payload,
+                params=params,
+            )
 
     def _pick_credit_toman(self, body: dict[str, Any]) -> int | float | None:
         user = body.get("user")
@@ -229,30 +263,184 @@ class LiaraAdapter:
         except httpx.HTTPError as e:
             return AdapterResult(False, "NETWORK_ERROR", str(e))
 
+    async def list_networks(self) -> AdapterResult:
+        """Private networks visible to the API token (not team-scoped query — team filter returns empty)."""
+        try:
+            r = await self._get("/v1/networks", team_scope=self._team_context())
+            if r.status_code >= 400:
+                return AdapterResult(False, "API_ERROR", f"networks API returned {r.status_code}")
+            data = r.json()
+            networks = data.get("networks", data) if isinstance(data, dict) else data
+            if not isinstance(networks, list):
+                networks = []
+            scope = "team" if self._team_context() else "account"
+            return AdapterResult(
+                True,
+                "OK",
+                f"Found {len(networks)} private network(s) on this {scope}.",
+                {"networks": networks, "team_id": self._team_id},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def create_network(self, network_name: str) -> AdapterResult:
+        name = (network_name or "").strip() or "my-network"
+        try:
+            r = await self._post_json(
+                "/v1/networks",
+                {"networkName": name},
+                team_scope=self._team_context(),
+            )
+            if r.status_code == 409:
+                resolved = await self._resolve_network_id(preferred_name=name, allow_create=False)
+                return AdapterResult(
+                    True,
+                    "OK",
+                    f"Network **{name}** already exists.",
+                    {"network_id": resolved, "network_name": name, "created": False},
+                )
+            if r.status_code >= 400:
+                return AdapterResult(
+                    False,
+                    "NETWORK_CREATE_FAILED",
+                    liara_error_message(r.text or "", r.status_code),
+                )
+            raw = r.json()
+            net = raw.get("network", raw) if isinstance(raw, dict) else {}
+            net_id = net.get("_id") if isinstance(net, dict) else None
+            return AdapterResult(
+                True,
+                "OK",
+                f"Created private network **{name}**.",
+                {"network_id": net_id, "network_name": name, "created": True},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def _resolve_network_id(
+        self,
+        *,
+        preferred_name: str | None = None,
+        allow_create: bool = True,
+    ) -> str:
+        settings = get_settings()
+        if settings.liara_network_id.strip():
+            return settings.liara_network_id.strip()
+
+        name = (preferred_name or settings.liara_network_name or "my-network").strip()
+
+        team = self._team_context()
+        r = await self._get("/v1/networks", team_scope=team)
+        if r.status_code >= 400:
+            raise RuntimeError(f"networks API returned {r.status_code}")
+        data = r.json()
+        networks = data.get("networks", data) if isinstance(data, dict) else data
+        if not isinstance(networks, list):
+            networks = []
+
+        for net in networks:
+            if isinstance(net, dict) and net.get("name") == name and net.get("_id"):
+                return str(net["_id"])
+        if networks:
+            first = networks[0]
+            if isinstance(first, dict) and first.get("_id"):
+                return str(first["_id"])
+
+        if not allow_create:
+            raise RuntimeError(f"private network '{name}' not found")
+
+        created = await self.create_network(name)
+        if not created.ok:
+            raise RuntimeError(created.message)
+        net_id = (created.data or {}).get("network_id")
+        if net_id:
+            return str(net_id)
+        r2 = await self._get("/v1/networks", team_scope=team)
+        data2 = r2.json()
+        nets2 = data2.get("networks", []) if isinstance(data2, dict) else []
+        for net in nets2:
+            if isinstance(net, dict) and net.get("name") == name and net.get("_id"):
+                return str(net["_id"])
+        raise RuntimeError("could not resolve network id after create")
+
     async def create_project(
         self,
         app: str,
-        platform: str = "next",
+        platform: str = "python",
         on_line: OnLine | None = None,
         run_id: str | None = None,
+        *,
+        network_name: str | None = None,
     ) -> AdapterResult:
-        rid = run_id or self._run_id
-        if await self.project_exists(app):
-            return AdapterResult(True, "OK", f"App {app} already exists", {"app": app, "created": False})
-        res = await self._cli.run(
-            "create",
-            "--app",
-            app,
-            "--platform",
-            platform,
-            on_line=on_line,
-            sandbox_run_id=rid,
-        )
-        if not res.ok:
-            if "exist" in res.stdout.lower() or "exist" in res.stderr.lower():
-                return AdapterResult(True, "OK", f"App {app} already exists", {"app": app, "created": False})
-            return AdapterResult(False, "CREATE_APP_FAILED", redact(res.stderr or res.stdout))
-        return AdapterResult(True, "OK", f"Created app {app}", {"app": app, "created": True})
+        app_id = normalize_liara_app_id(app)
+        plat = (platform or "").strip().lower()
+        id_err = validate_app_id(app_id)
+        if id_err:
+            return AdapterResult(False, "INVALID_APP_ID", id_err, {"app": app_id})
+        plat_err = validate_platform(plat)
+        if plat_err:
+            return AdapterResult(False, "INVALID_PLATFORM", plat_err, {"platform": plat})
+
+        if await self.project_exists(app_id):
+            return AdapterResult(
+                True,
+                "OK",
+                f"App {app_id} already exists",
+                {"app": app_id, "app_name": app_id, "platform": plat, "created": False},
+            )
+        if on_line:
+            await on_line(f"Creating Liara app {app_id} (platform={plat}) via API…")
+        try:
+            net_pref = (network_name or get_settings().liara_network_name or "my-network").strip()
+            network_id = await self._resolve_network_id(preferred_name=net_pref)
+            body = {
+                "name": app_id,
+                "platform": plat,
+                "planID": "small-g2",
+                "bundlePlanID": "basic",
+                "network": network_id,
+            }
+            r = await self._post_json("/v1/projects", body, team_scope=self._team_context())
+            if r.status_code >= 400:
+                text = redact(r.text)
+                if "exist" in text.lower():
+                    return AdapterResult(
+                        True,
+                        "OK",
+                        f"App {app_id} already exists",
+                        {"app": app_id, "platform": plat, "created": False},
+                    )
+                return AdapterResult(
+                    False,
+                    "CREATE_APP_FAILED",
+                    liara_error_message(text, r.status_code),
+                    {"response": text[:500], "team_id": self._team_id},
+                )
+            project_id = None
+            try:
+                data = r.json()
+                project_id = data.get("projectID") or data.get("project_id")
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                pass
+            return AdapterResult(
+                True,
+                "OK",
+                f"Created Liara app **{app_id}** with platform **{plat}**"
+                + (f" in team `{self._team_id}`." if self._team_id else " on your account."),
+                {
+                    "app": app_id,
+                    "app_name": app_id,
+                    "platform": plat,
+                    "created": True,
+                    "project_id": project_id,
+                    "team_id": self._team_id,
+                    "account_scope": "team" if self._team_id else "personal",
+                },
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+        except RuntimeError as e:
+            return AdapterResult(False, "CREATE_APP_FAILED", str(e))
 
     async def deploy(
         self,
@@ -262,7 +450,6 @@ class LiaraAdapter:
         on_line: OnLine | None = None,
         run_id: str | None = None,
     ) -> AdapterResult:
-        rid = run_id or self._run_id
         deploy_cwd = path if path and path != "." else None
         res = await self._cli.run(
             "deploy",
@@ -273,7 +460,7 @@ class LiaraAdapter:
             "--path",
             ".",
             on_line=on_line,
-            sandbox_run_id=rid,
+            sandbox_run_id=None,
             cwd=deploy_cwd,
         )
         if res.exit_code == 124:

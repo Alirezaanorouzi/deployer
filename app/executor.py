@@ -13,7 +13,7 @@ from app.agent.plan_builder import plan_from_decision
 from app.agent.planner_agent import REACT_SKILLS, AgentDecision, plan_with_agent
 from app.agent.tools.registry import tools_for_skill
 from app.planner import plan_max_risk
-from app.repo.paths import deploy_root, normalize_subpath
+from app.repo.paths import deploy_root, normalize_github_repo, normalize_subpath
 from app.repo.workspace import (
     analyze_local_directory,
     clone_repository,
@@ -120,16 +120,22 @@ class RunExecutor:
             repo = decision.params.get("repo") or decision.params.get("github_repo")
             if not repo:
                 raise ValueError("Agent could not determine GitHub repo — please specify owner/name.")
+            try:
+                repo = normalize_github_repo(repo, github_repos)
+            except ValueError as e:
+                raise ValueError(str(e).replace("CLONE_FAILED: ", "")) from e
             run = await self.create_pipeline_run(
                 repo,
                 normalize_subpath(decision.params.get("subpath")),
                 decision.params.get("liara_app_name") or decision.params.get("app_name"),
+                github_repos=github_repos,
             )
             ctx = self._ctx(run)
             ctx["agent_message"] = decision.assistant_message
             ctx["agent_loop"] = True
             ctx["user_goal"] = message
             ctx["agent_transcript"] = []
+            ctx["github_repos"] = github_repos or []
             self._save_ctx(run, ctx)
             await stream_bus.publish(
                 run.id,
@@ -237,8 +243,14 @@ class RunExecutor:
         repo: str,
         subpath: str | None = "",
         liara_app_name: str | None = None,
+        *,
+        github_repos: list[str] | None = None,
     ) -> Run:
         subpath = normalize_subpath(subpath)
+        try:
+            repo = normalize_github_repo(repo, github_repos)
+        except ValueError as e:
+            raise ValueError(str(e).replace("CLONE_FAILED: ", "")) from e
         run = Run(
             user_message=f"Pipeline deploy {repo} to Liara",
             state=RunState.planning,
@@ -254,6 +266,7 @@ class RunExecutor:
             "subpath": subpath,
             "liara_app_name": plan.steps[4].params.get("app_name"),
             "analysis": {},
+            "github_repos": github_repos or [],
         }
         run.context_json = json.dumps(ctx)
         run = await self._finalize_plan(run, plan)
@@ -473,7 +486,19 @@ class RunExecutor:
             await self._log(line)
 
         if name == "github_clone":
-            info = await clone_repository(run.id, params["repo"], on_log=on_line)
+            repo = params.get("repo") or ctx.get("repo")
+            if not repo:
+                raise RuntimeError("CLONE_FAILED: missing repo parameter")
+            try:
+                repo = normalize_github_repo(repo, ctx.get("github_repos"))
+            except ValueError as e:
+                raise RuntimeError(str(e)) from e
+            info = await clone_repository(
+                run.id,
+                repo,
+                on_log=on_line,
+                github_repos=ctx.get("github_repos"),
+            )
             ctx["clone_path"] = info["path"]
             ctx["commit"] = info["commit"]
             return json.dumps(info)
@@ -484,6 +509,7 @@ class RunExecutor:
             ctx["analysis"] = analysis
             ctx["deploy_path"] = str(root)
             ctx["stack"] = analysis.get("stack", "node")
+            ctx["deploy_port"] = analysis.get("deploy_port", 3000)
             summary = json.dumps(analysis, indent=2)
             for f in analysis.get("findings", []):
                 await self._log(f"  [{f.get('severity')}] {f.get('code')}: {f.get('message')}")
@@ -504,7 +530,13 @@ class RunExecutor:
 
         if name == "liara_create_app":
             app = params.get("app_name") or ctx.get("liara_app_name")
-            platform = "next" if ctx.get("stack") == "next" else "node"
+            stack = ctx.get("stack") or "node"
+            if stack == "python":
+                platform = "python"
+            elif stack == "next":
+                platform = "next"
+            else:
+                platform = "node"
             r = await self.liara.create_project(app, platform=platform, on_line=on_line)
             if not r.ok:
                 raise RuntimeError(f"{r.code}: {r.message}")
@@ -516,7 +548,7 @@ class RunExecutor:
             path = params.get("path") or ctx.get("deploy_path") or str(
                 deploy_root(run.id, normalize_subpath(ctx.get("subpath")))
             )
-            port = int(params.get("port", 3000))
+            port = int(params.get("port") or ctx.get("deploy_port") or 3000)
             r = await self.liara.deploy(app, path=path, port=port, on_line=on_line)
             if not r.ok:
                 raise RuntimeError(f"{r.code}: {r.message}")

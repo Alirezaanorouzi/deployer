@@ -1,10 +1,26 @@
 """Tool registry — register tools once, select & execute from the ReAct agent."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from app.liara.adapter import LiaraAdapter
+from app.liara.deploy_diagnostics import (
+    _LIARA_PYTHON_RUNTIME_CHECKLIST,
+    format_diagnosis,
+    hints_from_logs,
+)
+from app.liara.create_app import LIARA_CREATE_PLATFORMS, normalize_liara_app_id
+from app.liara.cli import OnLine
 from app.liara.writes import CONFIRMATION_MESSAGE, parse_env_updates, user_confirmed_write
+from app.repo.paths import deploy_root, normalize_github_repo, normalize_subpath
+from app.repo.workspace import (
+    analyze_local_directory,
+    clone_repository,
+    infer_liara_platform,
+    slug_app_name,
+    write_liara_config,
+)
 
 ToolHandler = Callable[..., Awaitable["ToolResult"]]
 
@@ -50,6 +66,39 @@ def _write_params(**extra: Any) -> dict[str, Any]:
     )
     props.update(extra)
     return {"type": "object", "properties": props, "additionalProperties": False}
+
+
+def _workspace_root_for_tool(params: dict[str, Any]) -> Path | None:
+    deploy_path = params.get("deploy_path")
+    if deploy_path:
+        p = Path(str(deploy_path)).resolve()
+        return p if p.is_dir() else None
+    run_id = params.get("run_id")
+    if not run_id:
+        return None
+    root = deploy_root(run_id, normalize_subpath(params.get("subpath")))
+    return root if root.is_dir() else None
+
+
+def _resolve_platform_for_create(params: dict[str, Any]) -> tuple[str | None, str | None]:
+    explicit = (params.get("platform") or "").strip().lower()
+    if explicit:
+        return explicit, None
+    root = _workspace_root_for_tool(params)
+    if not root:
+        return None, None
+    platform, stack = infer_liara_platform(root)
+    return platform, stack
+
+
+def _clone_error_result(exc: BaseException) -> ToolResult:
+    msg = str(exc).replace("CLONE_FAILED: ", "").strip()
+    if not msg:
+        msg = (
+            f"{type(exc).__name__}: GitHub fetch failed. "
+            "Check GITHUB_TOKEN, repo access (owner/name), and server terminal logs."
+        )
+    return ToolResult(False, "CLONE_FAILED", msg, {"error_type": type(exc).__name__})
 
 
 def _require_confirm(params: dict[str, Any]) -> ToolResult | None:
@@ -328,19 +377,154 @@ TOOLS: dict[str, ToolSpec] = {
     ),
     "liara.deploy_service": ToolSpec(
         id="liara.deploy_service",
-        name="Deploy app from directory",
+        name="Deploy / release (platform Deploy tab)",
         description=(
-            "Deploy local project path with Liara CLI (same as console New Deployment). "
-            "Requires confirm_write and deploy_path on server."
+            "Upload source, build, and start the app — same as the Liara platform service **Deploy / استقرار** "
+            "sub-tab (turns app from ready آماده به کار to running روشن). "
+            "Requires confirm_write, app_name, and deploy_path from prepare_deploy_workspace."
         ),
         parameters_schema=_write_params(
             deploy_path={
                 "type": "string",
                 "description": "Absolute or workspace path containing liara.json / app source",
             },
-            port={"type": "integer", "description": "App port (default 3000)"},
+            port={"type": "integer", "description": "App listen port (default from prepare step or 3000)"},
+            platform={
+                "type": "string",
+                "description": "Liara platform: python, node, next, … (optional)",
+            },
         ),
         risk="high",
+    ),
+    "liara.list_networks": ToolSpec(
+        id="liara.list_networks",
+        name="List private networks",
+        description="List Liara private networks available for new apps (API).",
+        parameters_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        risk="low",
+    ),
+    "liara.ensure_private_network": ToolSpec(
+        id="liara.ensure_private_network",
+        name="Create private network if missing",
+        description=(
+            "Ensure a private network exists (default name from LIARA_NETWORK_NAME or my-network). "
+            "Runs automatically before create_app; call explicitly to create or pick a name."
+        ),
+        parameters_schema=_write_params(
+            network_name={
+                "type": "string",
+                "description": "Network name (e.g. my-network). Default from server env.",
+            },
+        ),
+        risk="medium",
+    ),
+    "liara.list_apps": ToolSpec(
+        id="liara.list_apps",
+        name="List Liara apps",
+        description="List PaaS apps (project_id slugs) on the current Liara account (API).",
+        parameters_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        risk="low",
+    ),
+    "liara.bind_app": ToolSpec(
+        id="liara.bind_app",
+        name="Select active app for this session",
+        description=(
+            "Bind a Liara app id as the active context so logs, settings, deploy, and other app tools "
+            "target that service. Call after create_app or when user names an existing app."
+        ),
+        parameters_schema=_project_params(),
+        risk="low",
+    ),
+    "liara.create_app": ToolSpec(
+        id="liara.create_app",
+        name="Create Liara PaaS app",
+        description=(
+            "Create a new Liara app via platform API (plan, network). Skips if the app id already exists. "
+            "Binds the app as active context on success. Requires confirm_write after user approves."
+        ),
+        parameters_schema=_write_params(
+            platform={
+                "type": "string",
+                "description": f"Liara platform (required after prepare): {', '.join(sorted(LIARA_CREATE_PLATFORMS))}",
+            },
+            network_name={
+                "type": "string",
+                "description": "Optional private network name (default LIARA_NETWORK_NAME / my-network)",
+            },
+        ),
+        risk="high",
+    ),
+    "liara.get_app_url": ToolSpec(
+        id="liara.get_app_url",
+        name="Resolve default app URL",
+        description="Return the default Liara subdomain (https://<app-id>.liara.run).",
+        parameters_schema=_project_params(),
+        risk="low",
+    ),
+    "liara.verify_app_health": ToolSpec(
+        id="liara.verify_app_health",
+        name="HTTP health check",
+        description="GET the app URL (or custom url) and report status code.",
+        parameters_schema=_project_params(
+            url={"type": "string", "description": "Optional full URL; default is app subdomain"},
+        ),
+        risk="low",
+    ),
+    "liara.diagnose_deploy_health": ToolSpec(
+        id="liara.diagnose_deploy_health",
+        name="Diagnose 502 / unhealthy deploy",
+        description=(
+            "HTTP check plus recent Liara logs when status is 5xx or connection fails. "
+            "Use after deploy_service when the app is ON but the URL fails."
+        ),
+        parameters_schema=_project_params(
+            url={"type": "string", "description": "Optional URL; default app subdomain"},
+            log_lines={"type": "integer", "description": "Log lines to fetch (default 40)"},
+        ),
+        risk="low",
+    ),
+    "repo.clone_github": ToolSpec(
+        id="repo.clone_github",
+        name="Clone GitHub repository",
+        description=(
+            "Clone owner/name into this run workspace (host git, sandbox, or GitHub zipball). "
+            "Requires params.repo and run_id (injected by agent)."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "repo": {
+                    "type": "string",
+                    "description": "GitHub owner/name, e.g. Alirezaanorouzi/deployer",
+                },
+                "run_id": {"type": "string", "description": "Workspace run id (auto)"},
+                "github_repos": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Known repos for resolving bare names",
+                },
+            },
+            "additionalProperties": False,
+        },
+        risk="low",
+    ),
+    "repo.prepare_deploy_workspace": ToolSpec(
+        id="repo.prepare_deploy_workspace",
+        name="Analyze repo and write liara.json",
+        description=(
+            "After clone: detect stack (python/next/node), write or update liara.json, return deploy_path and port."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+                "app_name": {"type": "string", "description": "Liara app id slug"},
+                "subpath": {"type": "string", "description": "Optional monorepo subfolder"},
+                "repo": {"type": "string", "description": "For default app slug from repo name"},
+            },
+            "additionalProperties": False,
+        },
+        risk="medium",
     ),
 }
 
@@ -584,23 +768,328 @@ async def _run_create_app_disk(liara: LiaraAdapter, params: dict[str, Any]) -> T
     return ToolResult(r.ok, r.code, r.message, r.data)
 
 
-async def _run_deploy_service(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+async def _run_deploy_service(
+    liara: LiaraAdapter,
+    params: dict[str, Any],
+    *,
+    on_log: OnLine | None = None,
+) -> ToolResult:
     blocked = _require_confirm(params)
     if blocked:
         return blocked
     path = params.get("deploy_path") or params.get("path") or "."
     port = params.get("port", 3000)
+    app = params.get("app_name") or params.get("app")
     try:
         port_i = int(port)
     except (TypeError, ValueError):
         port_i = 3000
     r = await liara.deploy_service_from_path(
         project_id=params.get("project_id"),
-        app_name=params.get("app_name") or params.get("app"),
+        app_name=app,
         path=path,
         port=port_i,
+        on_line=on_log,
     )
+    if r.ok:
+        return ToolResult(r.ok, r.code, r.message, r.data)
+    log_tail = ""
+    if app:
+        log_r = await liara.logs(str(app), lines=50)
+        if log_r.ok and log_r.data:
+            log_tail = (log_r.data.get("logs") or "")[-3500:]
+    hints = hints_from_logs(log_tail)
+    msg = r.message
+    if log_tail:
+        msg = format_diagnosis(
+            url=liara.project_url(str(app)) if app else "(app)",
+            status_code=None,
+            log_tail=log_tail,
+            extra_hints=hints,
+        )
+    return ToolResult(
+        False,
+        r.code or "DEPLOY_FAILED",
+        msg,
+        {**(r.data or {}), "logs": log_tail, "hints": hints, "app_name": app},
+    )
+
+
+async def _run_list_networks(liara: LiaraAdapter, _params: dict[str, Any]) -> ToolResult:
+    r = await liara.list_networks()
+    if not r.ok:
+        return ToolResult(False, r.code, r.message, r.data)
+    networks = (r.data or {}).get("networks") or []
+    lines = [
+        f"- **{n.get('name')}** (`{n.get('_id')}`)"
+        for n in networks
+        if isinstance(n, dict) and n.get("_id")
+    ]
+    msg = "Private networks:\n" + ("\n".join(lines) if lines else "(none — use ensure_private_network)")
+    return ToolResult(True, "OK", msg, r.data)
+
+
+async def _run_ensure_private_network(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    from app.config import get_settings
+
+    name = (params.get("network_name") or get_settings().liara_network_name or "my-network").strip()
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(
+            False,
+            blocked.code,
+            f"Will create or reuse private network **{name}**. {blocked.text_for_agent}",
+            None,
+        )
+    r = await liara.create_network(name)
     return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_list_apps(liara: LiaraAdapter, _params: dict[str, Any]) -> ToolResult:
+    r = await liara.list_projects()
+    if not r.ok:
+        return ToolResult(False, r.code, r.message, r.data)
+    projects = (r.data or {}).get("projects") or []
+    lines: list[str] = []
+    ids: list[str] = []
+    for p in projects:
+        if not isinstance(p, dict):
+            continue
+        pid = p.get("project_id") or p.get("name")
+        if not pid:
+            continue
+        ids.append(str(pid))
+        ptype = p.get("type") or p.get("platform") or "?"
+        lines.append(f"- **{pid}** ({ptype})")
+    scope = "team" if getattr(liara, "_team_id", None) else "personal account"
+    team_note = f"\n\n(Scope: **{scope}**" + (
+        f", team id `{liara._team_id}`)" if liara._team_id else ".)"
+    )
+    if not lines:
+        return ToolResult(
+            True,
+            "OK",
+            "No apps on this Liara account/team yet." + team_note,
+            {"app_ids": []},
+        )
+    return ToolResult(
+        True,
+        "OK",
+        "Apps on this account:\n" + "\n".join(lines) + team_note,
+        {"app_ids": ids, "projects": projects},
+    )
+
+
+async def _run_bind_app(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    app = params.get("app_name") or params.get("app") or params.get("project_id")
+    if not app:
+        return ToolResult(False, "INVALID_INPUT", "app_name is required", None)
+    if not await liara.project_exists(app):
+        return ToolResult(
+            False,
+            "NOT_FOUND",
+            f"App **{app}** not found on this Liara account. Use liara.list_apps or liara.create_app.",
+            None,
+        )
+    return ToolResult(
+        True,
+        "OK",
+        f"Active app set to **{app}**. App-scoped tools (logs, settings, deploy, …) will use this id.",
+        {"active_app": app, "app_name": app},
+    )
+
+
+async def _run_create_app(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return blocked
+    app = params.get("app_name") or params.get("app") or params.get("project_id")
+    if not app:
+        return ToolResult(False, "INVALID_INPUT", "app_name is required", None)
+    platform, stack = _resolve_platform_for_create(params)
+    if not platform:
+        return ToolResult(
+            False,
+            "PLATFORM_UNKNOWN",
+            "Cannot detect stack yet. Run **repo.clone_github** then **repo.prepare_deploy_workspace** "
+            "before create_app, or pass `platform` (e.g. python).",
+            None,
+        )
+    app = normalize_liara_app_id(app)
+    net_name = (params.get("network_name") or "").strip() or None
+    try:
+        r = await liara.create_project(app, platform=platform, network_name=net_name)
+    except RuntimeError as e:
+        return ToolResult(False, "CREATE_APP_FAILED", str(e), None)
+    data = dict(r.data or {})
+    data["active_app"] = app
+    data["app_name"] = app
+    data["platform"] = platform
+    if stack:
+        data["stack"] = stack
+    note = f" (platform **{platform}**"
+    if stack:
+        note += f", stack {stack}"
+    note += ")"
+    msg = r.message + note if r.ok else r.message
+    return ToolResult(r.ok, r.code, msg, data)
+
+
+async def _run_get_app_url(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    app = params.get("app_name") or params.get("app") or params.get("project_id")
+    if not app:
+        return ToolResult(False, "INVALID_INPUT", "app_name is required", None)
+    r = await liara.resolve_site_url(app)
+    if not r.ok:
+        return ToolResult(False, r.code, r.message, r.data)
+    url = (r.data or {}).get("url", liara.project_url(app))
+    return ToolResult(
+        True,
+        "OK",
+        f"Default URL: **{url}**",
+        {"url": url, "app_name": app},
+    )
+
+
+async def _run_verify_app_health(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    url = params.get("url") or params.get("health_url")
+    app = params.get("app_name") or params.get("app")
+    if not url and app:
+        url = liara.project_url(app)
+    if not url:
+        return ToolResult(False, "INVALID_INPUT", "url or app_name required", None)
+    base = url.rstrip("/")
+    candidates = [base, f"{base}/health"]
+    best_status = 0
+    best_url = base
+    last_data: dict[str, Any] = {}
+    for candidate in candidates:
+        r = await liara.health_http(candidate)
+        if not r.ok:
+            continue
+        status = int((r.data or {}).get("status_code") or 0)
+        last_data = r.data or {}
+        if status > best_status or (200 <= status < 400):
+            best_status = status
+            best_url = candidate
+        if 200 <= status < 400:
+            break
+    ok = 200 <= best_status < 400
+    msg = f"Health check **{best_url}** → HTTP {best_status}"
+    if not ok:
+        msg += (
+            "\n\nURL not healthy (502/503 often means crash or wrong port). "
+            "Next: **liara.diagnose_deploy_health** for logs and fixes."
+        )
+    return ToolResult(
+        ok,
+        "OK" if ok else "UNHEALTHY",
+        msg,
+        {"url": best_url, "status_code": best_status, "app_name": app, **last_data},
+    )
+
+
+async def _run_diagnose_deploy_health(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    app = params.get("app_name") or params.get("app")
+    url = params.get("url") or params.get("health_url") or (liara.project_url(app) if app else None)
+    if not url or not app:
+        return ToolResult(False, "INVALID_INPUT", "app_name required", None)
+    lines = int(params.get("log_lines") or 60)
+    health = await liara.health_http(url)
+    status = int((health.data or {}).get("status_code") or 0)
+    if status >= 400 or status == 0:
+        alt = await liara.health_http(url.rstrip("/") + "/health")
+        if alt.ok:
+            status = int((alt.data or {}).get("status_code") or status)
+    log_r = await liara.logs(str(app), lines=lines)
+    log_tail = ""
+    if log_r.ok and log_r.data:
+        log_tail = (log_r.data.get("logs") or "")[-5000:]
+    healthy = 200 <= status < 400
+    hints = hints_from_logs(log_tail)
+    body = format_diagnosis(url=url, status_code=status or None, log_tail=log_tail, extra_hints=hints)
+    return ToolResult(
+        healthy,
+        "OK" if healthy else "UNHEALTHY",
+        body,
+        {"url": url, "status_code": status, "logs": log_tail, "hints": hints, "app_name": app},
+    )
+
+
+async def _run_clone_github(
+    _liara: LiaraAdapter,
+    params: dict[str, Any],
+    *,
+    on_log: OnLine | None = None,
+) -> ToolResult:
+    run_id = params.get("run_id")
+    repo = params.get("repo")
+    if not run_id:
+        return ToolResult(False, "INVALID_INPUT", "run_id is required for clone", None)
+    if not repo:
+        return ToolResult(False, "INVALID_INPUT", "repo (owner/name) is required", None)
+    candidates = params.get("github_repos")
+    if isinstance(candidates, list):
+        repos = [str(x) for x in candidates]
+    else:
+        repos = None
+    try:
+        repo = normalize_github_repo(str(repo), repos)
+    except ValueError as e:
+        return _clone_error_result(e)
+    try:
+        info = await clone_repository(run_id, repo, on_log=on_log, github_repos=repos)
+    except Exception as e:
+        return _clone_error_result(e)
+    return ToolResult(
+        True,
+        "OK",
+        f"Cloned **{repo}** @ `{info.get('commit', '')[:12]}`",
+        {"repo": repo, **info},
+    )
+
+
+async def _run_prepare_deploy_workspace(
+    _liara: LiaraAdapter,
+    params: dict[str, Any],
+) -> ToolResult:
+    run_id = params.get("run_id")
+    if not run_id:
+        return ToolResult(False, "INVALID_INPUT", "run_id is required", None)
+    subpath = normalize_subpath(params.get("subpath"))
+    repo = params.get("repo") or ""
+    app_name = params.get("app_name") or slug_app_name(repo or "app")
+    deploy_path = params.get("deploy_path")
+    if deploy_path:
+        root = Path(str(deploy_path)).resolve()
+    else:
+        root = deploy_root(run_id, subpath)
+    if not root.is_dir():
+        return ToolResult(
+            False,
+            "NOT_FOUND",
+            f"Workspace path missing: {root} (clone first?)",
+            None,
+        )
+    analysis = analyze_local_directory(root)
+    msg = write_liara_config(root, app_name, analysis)
+    stack = analysis.get("stack", "node")
+    port = int(analysis.get("deploy_port") or (8000 if stack == "python" else 3000))
+    platform = "python" if stack == "python" else ("next" if stack == "next" else "node")
+    return ToolResult(
+        True,
+        "OK",
+        f"{msg}. Stack **{stack}**, port **{port}**, deploy_path `{root}`."
+        + (f"\n\n{_LIARA_PYTHON_RUNTIME_CHECKLIST}" if stack == "python" else ""),
+        {
+            "deploy_path": str(root),
+            "port": port,
+            "stack": stack,
+            "platform": platform,
+            "app_name": app_name,
+            "analysis": analysis,
+        },
+    )
 
 
 async def _run_analyze_service_logs(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
@@ -641,6 +1130,16 @@ _HANDLERS: dict[str, ToolHandler] = {
     "liara.set_domain_redirect": _run_set_domain_redirect,
     "liara.create_app_disk": _run_create_app_disk,
     "liara.deploy_service": _run_deploy_service,
+    "liara.list_networks": _run_list_networks,
+    "liara.ensure_private_network": _run_ensure_private_network,
+    "liara.list_apps": _run_list_apps,
+    "liara.bind_app": _run_bind_app,
+    "liara.create_app": _run_create_app,
+    "liara.get_app_url": _run_get_app_url,
+    "liara.verify_app_health": _run_verify_app_health,
+    "liara.diagnose_deploy_health": _run_diagnose_deploy_health,
+    "repo.clone_github": _run_clone_github,
+    "repo.prepare_deploy_workspace": _run_prepare_deploy_workspace,
 }
 
 
@@ -657,8 +1156,15 @@ def list_tool_catalog() -> list[dict[str, Any]]:
     ]
 
 
-def tools_for_skill(skill_id: str) -> list[str]:
-    return _SKILL_TOOL_HINTS.get(skill_id, list(TOOLS.keys()))
+def tools_for_skill(skill_id: str, active_app: str | None = None) -> list[str]:
+    base = list(_SKILL_TOOL_HINTS.get(skill_id, list(TOOLS.keys())))
+    if skill_id == "liara.deploy" and active_app:
+        seen = set(base)
+        for tid in APP_SUBSERVICE_TOOL_IDS:
+            if tid not in seen:
+                base.append(tid)
+                seen.add(tid)
+    return base
 
 
 _SKILL_TOOL_HINTS: dict[str, list[str]] = {
@@ -686,11 +1192,34 @@ _SKILL_TOOL_HINTS: dict[str, list[str]] = {
         "liara.scale_service",
     ],
     "liara.deploy": [
-        "liara.list_deploy_releases",
+        "liara.list_networks",
+        "liara.ensure_private_network",
+        "liara.list_apps",
+        "liara.bind_app",
+        "repo.clone_github",
+        "repo.prepare_deploy_workspace",
+        "liara.create_app",
         "liara.deploy_service",
+        "liara.get_app_url",
+        "liara.verify_app_health",
+        "liara.diagnose_deploy_health",
+        "liara.list_deploy_releases",
     ],
     "agent.summarize": [],
 }
+
+# Unlocked for the active app after bind_app / create_app (logs, settings, …).
+APP_SUBSERVICE_TOOL_IDS: tuple[str, ...] = (
+    "liara.analyze_service_logs",
+    "liara.list_app_events",
+    "liara.list_deploy_releases",
+    "liara.list_app_domains",
+    "liara.list_app_disks",
+    "liara.get_app_settings",
+    "liara.get_service_resource_usage",
+    "liara.restart_service",
+    "liara.update_env_variables",
+)
 
 
 async def execute_tool(
@@ -698,10 +1227,17 @@ async def execute_tool(
     *,
     liara: LiaraAdapter,
     params: dict[str, Any] | None = None,
+    run_id: str | None = None,
+    on_log: OnLine | None = None,
 ) -> ToolResult:
     if tool_id not in TOOLS:
         return ToolResult(False, "UNKNOWN_TOOL", f"Unknown tool: {tool_id}", None)
     handler = _HANDLERS.get(tool_id)
     if not handler:
         return ToolResult(False, "NO_HANDLER", f"No handler for {tool_id}", None)
-    return await handler(liara, params or {})
+    p = dict(params or {})
+    if run_id and not p.get("run_id"):
+        p["run_id"] = run_id
+    if tool_id in ("repo.clone_github", "liara.deploy_service"):
+        return await handler(liara, p, on_log=on_log)
+    return await handler(liara, p)

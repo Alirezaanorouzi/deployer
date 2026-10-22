@@ -3,7 +3,7 @@
 
 param(
   [string]$Owner = "Alirezaanorouzi",
-  [string]$RepoName = "liara-deployer"
+  [string]$RepoName = "deployer"
 )
 
 $ErrorActionPreference = "Stop"

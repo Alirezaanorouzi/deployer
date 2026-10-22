@@ -1,7 +1,11 @@
 import asyncio
 import json
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
@@ -9,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.paths import data_root
 from app.llm.client import LlmNotConfiguredError, llm_configured
 from app.sandbox.docker_runner import docker_available
 from app.database import SessionLocal, get_db, init_db
@@ -24,8 +29,8 @@ from app.streaming import sse_format, stream_bus
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Path("data").mkdir(exist_ok=True)
-    Path("data/workspaces").mkdir(parents=True, exist_ok=True)
+    root = data_root()
+    (root / "workspaces").mkdir(parents=True, exist_ok=True)
     init_db()
     yield
 

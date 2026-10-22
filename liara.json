@@ -1,0 +1,9 @@
+{
+  "platform": "python",
+  "app": "deployer",
+  "port": 8000,
+  "args": ["python main.py"],
+  "python": {
+    "version": "3.12"
+  }
+}

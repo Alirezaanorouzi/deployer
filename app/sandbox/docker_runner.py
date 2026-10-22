@@ -126,13 +126,20 @@ async def run_in_sandbox(
             rel = workdir_in_container.removeprefix("/workspace").lstrip("/")
             cwd = str(Path(host_ws) / rel) if rel else cwd
 
-    proc = await asyncio.create_subprocess_exec(
-        *proc_argv,
-        cwd=cwd,
-        env=None if use_docker else _merge_host_env(env),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *proc_argv,
+            cwd=cwd,
+            env=None if use_docker else _merge_host_env(env),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+    except NotImplementedError:
+        return SandboxResult(
+            127,
+            "Subprocess not supported in this asyncio event loop (Windows/uvicorn). "
+            "Use GitHub zipball or host git instead.",
+        )
     parts: list[str] = []
     try:
         if proc.stdout:

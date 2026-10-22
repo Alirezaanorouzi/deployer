@@ -5,6 +5,7 @@ from typing import Any
 from app.config import get_settings
 from app.llm.client import get_llm_client
 from app.pipeline_planner import PIPELINE_SKILL
+from app.repo.paths import normalize_github_repo
 
 
 ALLOWED_SKILLS = [
@@ -90,6 +91,35 @@ def _apply_skill_overrides(
     return skill_id
 
 
+def _apply_pipeline_repo_params(
+    user_message: str,
+    skill_id: str,
+    params: dict[str, Any],
+    github_repos: list[str] | None,
+) -> None:
+    if skill_id not in (PIPELINE_SKILL, "liara.deploy"):
+        return
+    if github_repos:
+        params.setdefault("github_repos", github_repos[:25])
+    repos = github_repos or []
+    m = user_message.lower()
+    if not params.get("repo"):
+        if "deployer" in m or "دیپلوی" in user_message:
+            for r in repos:
+                if r.lower().endswith("/deployer"):
+                    params["repo"] = r
+                    break
+        if not params.get("repo") and len(repos) == 1:
+            params["repo"] = repos[0]
+    if params.get("repo"):
+        try:
+            params["repo"] = normalize_github_repo(params["repo"], repos)
+        except ValueError:
+            pass
+    if not params.get("liara_app_name") and params.get("repo"):
+        params.setdefault("liara_app_name", params["repo"].split("/")[-1])
+
+
 def _apply_confirm_write(user_message: str, params: dict[str, Any]) -> None:
     """When the user clearly approves a pending write, allow tools to proceed."""
     m = user_message.lower().strip()
@@ -106,7 +136,10 @@ def _apply_confirm_write(user_message: str, params: dict[str, Any]) -> None:
         "انجام بده",
         "اوکی",
     )
-    if any(a in m for a in affirm):
+    deploy_intent = any(
+        x in m for x in ("deploy", "publish", "release", "دیپلوی", "منتشر", "لیارا")
+    )
+    if any(a in m for a in affirm) and not deploy_intent:
         params["confirm_write"] = True
 
 
@@ -181,11 +214,13 @@ Rules:
 - Use liara.disks for persistent disks/volumes attached to an app.
 - Use liara.settings for app Settings (env var names, zero-downtime, network) — secrets are never exposed.
 - Use liara.resize when the user asks about plan, pricing, scale/replicas, or resizing. Agent can change plan or scale with write tools after user confirms (confirm_write).
-- Use liara.deploy when the user wants to redeploy / new deployment from an existing local or workspace path (not GitHub pipeline). Set deploy_path when known.
+- Use liara.deploy when the user wants to publish or deploy to Liara (GitHub repo or local path). Set params.repo (owner/name) for GitHub; set deploy_path for local redeploy. Order: clone → prepare → create_app → **liara.deploy_service** (console Deploy tab) → get_app_url → verify_app_health; on 502/503 or failed deploy use **liara.diagnose_deploy_health** (logs + hints). Set LIARA_TEAM_ID for team accounts.
 - Use liara.settings for env vars, zero-downtime, restart — writes need confirm_write after user approval.
 - Use liara.domains / liara.disks for list or create/configure — writes need confirm_write. Disk names: hyphens only (shop-cache); size in GB as integer.
 - Write tools refuse without confirm_write; explain the change first, then set confirm_write when user agrees.
-- Use pipeline.github_to_liara when the user wants to deploy from GitHub, go live on Liara, or "publish my repo".
+- Prefer liara.deploy in chat for "deploy / publish / go live on Liara". Set params.repo to owner/name (e.g. Alirezaanorouzi/deployer) and params.liara_app_name or app_name.
+- Use pipeline.github_to_liara only when the user explicitly wants the left-panel pipeline with Approve & continue (legacy UI flow).
+- For this deployer FastAPI repo on GitHub, use repo Alirezaanorouzi/deployer — not a bare name deployer.
 - Use agent.summarize when the user asks for a conclusion, recap, or summary of what was already discussed in chat (no new API calls).
 - Use incident.diagnose when the user reports slowness AND wants logs checked, or a broad outage (health + metrics + logs + analysis). Always set params.app_name to the Liara project id.
 - Prefer liara.logs when the user only wants logs without performance investigation.
@@ -224,6 +259,7 @@ Rules:
     skill_id = _apply_skill_overrides(user_message, skill_id, conversation_history)
 
     params = data.get("params") or {}
+    _apply_pipeline_repo_params(user_message, skill_id, params, github_repos)
     if app and not params.get("app_name"):
         params["app_name"] = app
     if target_env:
@@ -232,6 +268,9 @@ Rules:
         params.setdefault("health_url", health_url)
 
     _apply_confirm_write(user_message, params)
+    if skill_id == "liara.deploy":
+        # User asked to deploy/publish — same run may create app and upload code.
+        params["confirm_write"] = True
 
     return AgentDecision(
         skill_id=skill_id,
