@@ -42,9 +42,27 @@ _LOG_RULES: list[tuple[re.Pattern[str], str]] = [
         "Liara build/deploy failed. Check Dockerfile/liara.json, `requirements.txt`, and platform.",
     ),
     (
+        re.compile(
+            r"Could not open requirements file|No such file or directory: .*\.txt",
+            re.I,
+        ),
+        "Build cannot read a requirements include. Put every pin in top-level `requirements.txt` "
+        "(no `-r other.txt` on Liara) and ensure `wheels/` is in the deploy tree.",
+    ),
+    (
+        re.compile(r"No matching distribution found|Could not find a version that satisfies", re.I),
+        "Offline pip could not find a wheel. Run `python scripts/refresh_liara_wheels.py`, "
+        "commit `wheels/`, and redeploy.",
+    ),
+    (
         re.compile(r"Collecting sqlalchemy|Installing dependencies using pip", re.I),
         "Build can pause for several minutes on pip with loose `>=` versions or `uvicorn[standard]`. "
         "Pin versions in `requirements.txt` and use plain `uvicorn` on Liara; redeploy.",
+    ),
+    (
+        re.compile(r"Please upgrade your client|npm install -g @liara/cli", re.I),
+        "That line is a Liara CLI version notice in logs — not the root cause. "
+        "Scroll up for the real pip/build error (requirements / wheels / start command).",
     ),
     (
         re.compile(r"Error: listen EADDRINUSE|address already in use", re.I),

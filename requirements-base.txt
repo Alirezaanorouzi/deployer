@@ -1,4 +1,4 @@
-# Shared pins (local + Liara). Edit versions here, then refresh wheels/.
+# Shared pins for local (requirements-dev) and wheel refresh. Keep in sync with requirements.txt package lines.
 fastapi==0.161.1
 uvicorn==0.54.0
 sqlalchemy==2.0.36

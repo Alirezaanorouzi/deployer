@@ -9,6 +9,7 @@ from app.liara.deploy_diagnostics import (
     _LIARA_PYTHON_RUNTIME_CHECKLIST,
     format_diagnosis,
     hints_from_logs,
+    strip_ansi,
 )
 from app.liara.create_app import LIARA_CREATE_PLATFORMS, normalize_liara_app_id
 from app.liara.cli import OnLine
@@ -1188,31 +1189,50 @@ async def _run_deploy_service(
     )
     if r.ok:
         return ToolResult(r.ok, r.code, r.message, r.data)
+    cli_msg = strip_ansi(r.message or "Deploy failed")
+    hints = hints_from_logs(cli_msg)
     log_tail = ""
     if app:
         log_r = await liara.logs(str(app), lines=40)
         if log_r.ok and log_r.data:
             log_tail = (log_r.data.get("logs") or "")[-2000:]
-    hints = hints_from_logs(log_tail)
+    runtime_hints = hints_from_logs(log_tail) if log_tail else []
+    for h in runtime_hints:
+        if h not in hints:
+            hints.append(h)
     if "modulenotfounderror" in log_tail.lower() or "no module named" in log_tail.lower():
         hints.insert(
             0,
             "Container crashed on import — on Liara use `python main.py` at repo root and ensure the `app` package is deployed.",
         )
-    msg = (r.message or "Deploy failed")[:800]
-    if log_tail:
-        msg = format_diagnosis(
-            url=liara.project_url(str(app)) if app else "(app)",
-            status_code=None,
-            log_tail=log_tail,
-            extra_hints=hints,
-            log_max_chars=1000,
+    # Prefer CLI/build output (pip errors). Runtime logs alone often only say "upgrade CLI".
+    cli_core = cli_msg.strip()
+    if len(cli_core) > 1800:
+        cli_core = "…" + cli_core[-1800:]
+    parts = [f"**Deploy CLI / build failed**\n\n{cli_core}"]
+    if hints:
+        parts.append("**Hints:**\n" + "\n".join(f"- {h}" for h in hints[:6]))
+    useless_runtime = (
+        not log_tail
+        or "upgrade your client" in log_tail.lower()
+        or "npm install -g @liara/cli" in log_tail.lower()
+    )
+    if log_tail and not useless_runtime:
+        parts.append(
+            format_diagnosis(
+                url=liara.project_url(str(app)) if app else "(app)",
+                status_code=None,
+                log_tail=log_tail,
+                extra_hints=[],
+                log_max_chars=800,
+            )
         )
+    msg = "\n\n".join(parts)
     return ToolResult(
         False,
         r.code or "DEPLOY_FAILED",
         msg,
-        {**(r.data or {}), "logs": log_tail, "hints": hints, "app_name": app},
+        {**(r.data or {}), "logs": log_tail, "cli_message": cli_msg, "hints": hints, "app_name": app},
     )
 
 

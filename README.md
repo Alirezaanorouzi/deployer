@@ -32,7 +32,7 @@ Optional: [docs/cursor-sdk.md](docs/cursor-sdk.md) — `CURSOR_API_KEY`, default
 
 `liara.json` uses `python main.py` on port **8000** and a **`data`** disk for SQLite. Set **`WORKSPACE_API_KEY`**, **`LIARA_API_TOKEN`**, and LLM/GitHub keys in the Liara app env.
 
-**Faster Liara pip:** `wheels/` holds pre-downloaded Linux packages (~8 MB). Production `requirements.txt` uses `--no-index --find-links=./wheels`. After changing pins in `requirements-base.txt`, run `python scripts/refresh_liara_wheels.py` and commit the updated wheels before deploy.
+**Faster Liara pip:** `wheels/` holds pre-downloaded Linux packages (~8 MB). Production `requirements.txt` lists pins inline (no `-r` includes — Liara builds often miss nested files) with `--no-index --find-links=./wheels`. After changing pins, update both `requirements.txt` and `requirements-base.txt`, run `python scripts/refresh_liara_wheels.py`, and commit `wheels/` before deploy.
 
 ## Publish to GitHub
 

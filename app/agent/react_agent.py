@@ -708,13 +708,22 @@ Write in the user's language (Persian or English). Brief, friendly summary."""
                         observations,
                         latest_user_message=run.user_message,
                     )
-                run.state = RunState.succeeded
                 run.result_summary = final_message or "Done."
+                if skill_id == "liara.deploy" and _deploy_blocked_by_failure(
+                    skill_id, observations
+                ):
+                    run.state = RunState.failed
+                    run.error_code = run.error_code or "DEPLOY_FAILED"
+                    run.error_message = (final_message or "Deploy failed")[:2000]
+                else:
+                    run.state = RunState.succeeded
                 break
             if _deploy_blocked_by_failure(skill_id, observations):
                 err_msg = _last_tool_error(observations)
                 await executor._agent_chat(run, ctx, err_msg, append=True)
-                run.state = RunState.succeeded
+                run.state = RunState.failed
+                run.error_code = "DEPLOY_FAILED"
+                run.error_message = err_msg[:2000]
                 run.result_summary = err_msg
                 break
             continue
