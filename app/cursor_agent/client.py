@@ -26,6 +26,10 @@ def cursor_sdk_configured() -> bool:
 
 def cursor_api_key_issue() -> str | None:
     """Return a user-facing config error, or None if the key looks usable."""
+    from app.cursor_agent.model_selection import cursor_sdk_available
+
+    if not cursor_sdk_available():
+        return "cursor-sdk is not installed on this server (Liara production uses requirements without it)"
     key = (get_settings().cursor_api_key or "").strip()
     if not key:
         return "CURSOR_API_KEY not configured"
