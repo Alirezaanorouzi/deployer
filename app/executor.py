@@ -79,24 +79,28 @@ class RunExecutor:
         user: str,
         temperature: float | None = 0.25,
         new_block: bool = True,
+        replace: bool = False,
     ) -> str:
         from app.llm.streaming import stream_chat_to_run
 
         prev = (ctx.get("agent_message") or "").strip()
+        if replace:
+            prev = ""
         text = await stream_chat_to_run(
             run.id,
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
             temperature=temperature,
             new_block=new_block and bool(prev),
+            replace=replace,
         )
         if not text:
             return ""
-        if prev and new_block:
-            ctx["agent_message"] = f"{prev}\n\n{text}".strip()
-        elif prev:
-            ctx["agent_message"] = f"{prev}{text}"
-        else:
+        if replace or not prev:
             ctx["agent_message"] = text
+        elif new_block:
+            ctx["agent_message"] = f"{prev}\n\n{text}".strip()
+        else:
+            ctx["agent_message"] = f"{prev}{text}"
         self._save_ctx(run, ctx)
         return text
 
@@ -188,9 +192,10 @@ class RunExecutor:
 
         plan = plan_from_decision(decision)
         app_slug = decision.params.get("app_name") or decision.params.get("liara_app_name")
+        intro = (decision.assistant_message or "").strip()
         run.context_json = json.dumps(
             {
-                "agent_message": decision.assistant_message,
+                "agent_message": "",
                 "agent_loop": True,
                 "user_goal": message,
                 "agent_transcript": [],
@@ -200,11 +205,8 @@ class RunExecutor:
             }
         )
         run = await self._finalize_plan(run, plan)
-        await stream_bus.publish(
-            run.id,
-            "agent_message",
-            {"text": decision.assistant_message, "append": False},
-        )
+        if intro:
+            await stream_bus.publish(run.id, "agent_thinking", {"text": intro})
         return run
 
     async def create_react_run(
@@ -217,10 +219,11 @@ class RunExecutor:
         liara_projects: list[str] | None = None,
         default_app: str | None = None,
     ) -> Run:
-        from app.agent.conversation_params import compose_user_goal, enrich_planner_params
+        from app.agent.context_builder import current_user_goal
+        from app.agent.conversation_params import enrich_planner_params
 
         planner_params = dict(decision.params or {})
-        user_goal = compose_user_goal(message, conversation_history)
+        user_goal = current_user_goal(message)
         enrich_planner_params(
             decision.skill_id,
             message,

@@ -376,6 +376,8 @@ async def liara_project(project_id: str):
 
 @app.get("/integrations/github/repos", dependencies=[Depends(verify_api_key)])
 async def github_repos():
+    import httpx
+
     try:
         gh = GitHubClient()
         repos = await gh.list_repos()
@@ -386,6 +388,11 @@ async def github_repos():
         return {"repos": slim}
     except GitHubError as e:
         raise HTTPException(400, detail=str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            502,
+            detail=f"Could not reach GitHub API ({e}). Check network; disable bad HTTP_PROXY or set NO_PROXY for api.github.com.",
+        )
 
 
 @app.get("/terminal/log", response_model=TerminalLogResponse, dependencies=[Depends(verify_api_key)])

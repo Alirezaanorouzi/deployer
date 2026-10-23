@@ -15,16 +15,61 @@ OnLine = Callable[[str], Awaitable[None] | None]
 
 _HEARTBEAT_SEC = 40.0
 _DEPLOY_TAIL_LINES = 28
+_DEPLOY_TIMEOUT_SEC = 1800.0  # pip on Liara mirror can take 10+ minutes on first build
+
+
+class _DeployBuildProgress:
+    """Track Liara Docker/pip build so heartbeats explain long silent periods."""
+
+    def __init__(self) -> None:
+        self.in_build = False
+        self.in_pip = False
+        self.last_hint = ""
+
+    def observe(self, line: str) -> None:
+        low = (line or "").lower()
+        if "- building" in low or "preparing the build environment" in low:
+            self.in_build = True
+        if "installing dependencies using pip" in low:
+            self.in_pip = True
+            self.in_build = True
+            self.last_hint = "pip install on Liara (first build often 3–10 min)"
+        if low.startswith("collecting "):
+            pkg = line.strip().split("(")[0].replace("Collecting ", "").strip()
+            self.last_hint = f"pip resolving {pkg}"
+        if "downloading " in low:
+            self.last_hint = line.strip()[:140]
+        if "installing collected packages" in low:
+            self.last_hint = "pip installing wheels"
+        if "deployment finished successfully" in low:
+            self.in_pip = False
+            self.in_build = False
+
+    def heartbeat_message(self) -> str:
+        if self.in_pip:
+            hint = self.last_hint or "pip install"
+            return (
+                f"— Liara build: still installing Python packages ({hint}). "
+                "Large wheels (e.g. SQLAlchemy ~5MB) can take several minutes — not frozen —"
+            )
+        if self.in_build:
+            return "— Liara build still running (Docker/build step) —"
+        return "— Liara CLI still running…"
 
 
 class _DeployTailTracker:
-    """Liara CLI tails logs after deploy; stop reading once deploy succeeded + short tail."""
+    """Liara CLI tails logs after deploy; stop reading stdout once deploy succeeded + short tail."""
 
     def __init__(self) -> None:
         self._finished = False
         self._lines_after = 0
 
-    def on_line(self, line: str) -> bool:
+    @property
+    def succeeded(self) -> bool:
+        return self._finished
+
+    def observe(self, line: str) -> bool:
+        """Return True when we should stop reading stdout (do not kill the CLI process)."""
         low = (line or "").lower()
         if "deployment finished successfully" in low or "open up the url below" in low:
             self._finished = True
@@ -32,6 +77,15 @@ class _DeployTailTracker:
             self._lines_after += 1
             return self._lines_after > _DEPLOY_TAIL_LINES
         return False
+
+
+def _deploy_stdout_success(stdout: str) -> bool:
+    low = (stdout or "").lower()
+    return (
+        "deployment finished successfully" in low
+        or "open up the url below" in low
+        or "deployed successfully" in low
+    )
 
 
 @dataclass
@@ -43,6 +97,23 @@ class CliResult:
     @property
     def ok(self) -> bool:
         return self.exit_code == 0
+
+
+def _finalize_cli_result(
+    code: int,
+    stdout: str,
+    stderr: str,
+    *,
+    deploy_tail: _DeployTailTracker | None,
+) -> CliResult:
+    stdout = redact(stdout)
+    if deploy_tail and deploy_tail.succeeded:
+        return CliResult(0, stdout, "")
+    if code != 0 and _deploy_stdout_success(stdout):
+        return CliResult(0, stdout, "")
+    if code != 0 and "timeout" in stdout.lower():
+        return CliResult(code, stdout, "BUILD_TIMEOUT: " + stdout[-500:])
+    return CliResult(code, stdout, "" if code == 0 else (stderr or stdout[-2000:]))
 
 
 class LiaraCli:
@@ -87,6 +158,8 @@ class LiaraCli:
         sandbox_run_id: str | None = None,
     ) -> CliResult:
         args = self._argv(*args)
+        if args and args[0] == "deploy":
+            timeout = max(timeout, _DEPLOY_TIMEOUT_SEC)
         if sandbox_run_id:
             workdir = host_path_to_container(sandbox_run_id, cwd or ".")
             argv = ["liara", *args]
@@ -111,7 +184,9 @@ class LiaraCli:
         env.update(self._env())
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("NODE_NO_READLINE", "1")
-        deploy_tail = _DeployTailTracker() if args and args[0] == "deploy" else None
+        is_deploy = bool(args and args[0] == "deploy")
+        deploy_tail = _DeployTailTracker() if is_deploy else None
+        build_progress = _DeployBuildProgress() if is_deploy else None
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -138,30 +213,45 @@ class LiaraCli:
                     try:
                         line_b = await asyncio.wait_for(proc.stdout.readline(), timeout=wait)
                     except asyncio.TimeoutError:
-                        await self._emit(on_line, "— Liara CLI still running…")
+                        msg = (
+                            build_progress.heartbeat_message()
+                            if build_progress
+                            else "— Liara CLI still running…"
+                        )
+                        await self._emit(on_line, msg)
                         continue
                     if not line_b:
                         break
                     line = line_b.decode(errors="replace")
                     stdout_parts.append(line)
+                    if build_progress:
+                        build_progress.observe(line)
                     await self._emit(on_line, line.rstrip("\n"))
-                    if deploy_tail and deploy_tail.on_line(line):
-                        proc.terminate()
+                    if deploy_tail and deploy_tail.observe(line):
                         break
             remaining = deadline - time.monotonic()
             if remaining > 0:
-                await asyncio.wait_for(proc.wait(), timeout=remaining)
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=min(remaining, 45.0))
+                except asyncio.TimeoutError:
+                    if deploy_tail and deploy_tail.succeeded:
+                        proc.terminate()
+                        await asyncio.wait_for(proc.wait(), timeout=10.0)
+                    else:
+                        raise
             else:
                 raise asyncio.TimeoutError
         except asyncio.TimeoutError:
             proc.kill()
             return CliResult(124, "".join(stdout_parts), "BUILD_TIMEOUT: command exceeded timeout")
 
-        stdout = redact("".join(stdout_parts))
         code = proc.returncode or 0
-        if code != 0 and "timeout" in stdout.lower():
-            return CliResult(code, stdout, "BUILD_TIMEOUT: " + stdout[-500:])
-        return CliResult(code, stdout, "" if code == 0 else stdout[-2000:])
+        return _finalize_cli_result(
+            code,
+            "".join(stdout_parts),
+            "",
+            deploy_tail=deploy_tail,
+        )
 
     async def _run_host_sync_subprocess(
         self,
@@ -178,7 +268,9 @@ class LiaraCli:
         proc_box: list[subprocess.Popen[str]] = []
         read_err: list[BaseException] = []
 
-        deploy_tail = _DeployTailTracker() if cmd and "deploy" in cmd else None
+        is_deploy = bool(cmd and "deploy" in cmd)
+        deploy_tail = _DeployTailTracker() if is_deploy else None
+        build_progress = _DeployBuildProgress() if is_deploy else None
 
         def _reader() -> None:
             try:
@@ -195,8 +287,7 @@ class LiaraCli:
                 assert proc.stdout is not None
                 for line in proc.stdout:
                     line_q.put(line)
-                    if deploy_tail and deploy_tail.on_line(line):
-                        proc.terminate()
+                    if deploy_tail and deploy_tail.observe(line):
                         break
             except BaseException as e:
                 read_err.append(e)
@@ -220,11 +311,18 @@ class LiaraCli:
                     lambda w=wait: line_q.get(timeout=w),
                 )
             except Empty:
-                await self._emit(on_line, "— Liara CLI still running…")
+                msg = (
+                    build_progress.heartbeat_message()
+                    if build_progress
+                    else "— Liara CLI still running…"
+                )
+                await self._emit(on_line, msg)
                 continue
             if line is None:
                 break
             chunks.append(line)
+            if build_progress:
+                build_progress.observe(line)
             await self._emit(on_line, line.rstrip("\n"))
 
         proc = proc_box[0] if proc_box else None
@@ -250,11 +348,13 @@ class LiaraCli:
         if read_err and not chunks:
             return CliResult(127, "", f"CLI subprocess error: {read_err[0]}")
 
-        stdout = redact("".join(chunks))
         if timed_out:
-            stdout = (stdout + "\nBUILD_TIMEOUT").strip()
+            stdout = redact("".join(chunks) + "\nBUILD_TIMEOUT")
             return CliResult(124, stdout, "BUILD_TIMEOUT: command exceeded timeout")
         code = int(proc.returncode or 0) if proc else 127
-        if code != 0 and "timeout" in stdout.lower():
-            return CliResult(code, stdout, "BUILD_TIMEOUT: " + stdout[-500:])
-        return CliResult(code, stdout, "" if code == 0 else stdout[-2000:])
+        return _finalize_cli_result(
+            code,
+            "".join(chunks),
+            "",
+            deploy_tail=deploy_tail,
+        )

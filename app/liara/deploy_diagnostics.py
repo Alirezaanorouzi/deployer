@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import re
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text or "")
+
 _LOG_RULES: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"Read-only file system|OSError: \[Errno 30\]", re.I),
@@ -26,8 +32,19 @@ _LOG_RULES: list[tuple[re.Pattern[str], str]] = [
         "CLI flag order: `liara deploy --app X --team-id Y` (team id after subcommand).",
     ),
     (
+        re.compile(r"Disk `[^`]+` does not exist", re.I),
+        "liara.json references a disk that was never created. Either call **liara.create_app_disk** "
+        "before deploy, or remove `disks` from liara.json and use **DATA_DIR** / `paths.data_root()` "
+        "(e.g. `/tmp/deployer-data` on Liara).",
+    ),
+    (
         re.compile(r"Deployment failed|BUILD_FAILED", re.I),
         "Liara build/deploy failed. Check Dockerfile/liara.json, `requirements.txt`, and platform.",
+    ),
+    (
+        re.compile(r"Collecting sqlalchemy|Installing dependencies using pip", re.I),
+        "Build can pause for several minutes on pip with loose `>=` versions or `uvicorn[standard]`. "
+        "Pin versions in `requirements.txt` and use plain `uvicorn` on Liara; redeploy.",
     ),
     (
         re.compile(r"Error: listen EADDRINUSE|address already in use", re.I),
@@ -71,7 +88,9 @@ def format_diagnosis(
     status_code: int | None,
     log_tail: str,
     extra_hints: list[str] | None = None,
+    log_max_chars: int = 1400,
 ) -> str:
+    log_tail = strip_ansi(log_tail)
     hints = hints_from_logs(log_tail)
     if extra_hints:
         for h in extra_hints:
@@ -80,7 +99,8 @@ def format_diagnosis(
     status = status_code if status_code else "error"
     body = f"**{url}** → HTTP {status}\n\n"
     if log_tail.strip():
-        body += f"**Recent logs:**\n```\n{log_tail[-2800:]}\n```\n\n"
+        tail = log_tail[-log_max_chars:]
+        body += f"**Recent logs:**\n```\n{tail}\n```\n\n"
     if hints:
         body += "**Likely fixes:**\n" + "\n".join(f"- {h}" for h in hints)
     return body

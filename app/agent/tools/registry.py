@@ -1190,17 +1190,23 @@ async def _run_deploy_service(
         return ToolResult(r.ok, r.code, r.message, r.data)
     log_tail = ""
     if app:
-        log_r = await liara.logs(str(app), lines=50)
+        log_r = await liara.logs(str(app), lines=40)
         if log_r.ok and log_r.data:
-            log_tail = (log_r.data.get("logs") or "")[-3500:]
+            log_tail = (log_r.data.get("logs") or "")[-2000:]
     hints = hints_from_logs(log_tail)
-    msg = r.message
+    if "modulenotfounderror" in log_tail.lower() or "no module named" in log_tail.lower():
+        hints.insert(
+            0,
+            "Container crashed on import — on Liara use `python main.py` at repo root and ensure the `app` package is deployed.",
+        )
+    msg = (r.message or "Deploy failed")[:800]
     if log_tail:
         msg = format_diagnosis(
             url=liara.project_url(str(app)) if app else "(app)",
             status_code=None,
             log_tail=log_tail,
             extra_hints=hints,
+            log_max_chars=1000,
         )
     return ToolResult(
         False,
@@ -1629,6 +1635,21 @@ _SKILL_TOOL_HINTS: dict[str, list[str]] = {
         "liara.list_available_plans",
         "liara.change_service_plan",
         "liara.scale_service",
+    ],
+    "liara.health": [
+        "liara.bind_app",
+        "liara.get_app_url",
+        "liara.verify_app_health",
+        "liara.diagnose_deploy_health",
+        "liara.get_service_resource_usage",
+    ],
+    "incident.diagnose": [
+        "liara.bind_app",
+        "liara.get_app_url",
+        "liara.verify_app_health",
+        "liara.diagnose_deploy_health",
+        "liara.analyze_service_logs",
+        "liara.get_service_resource_usage",
     ],
     "liara.deploy": [
         "liara.list_networks",

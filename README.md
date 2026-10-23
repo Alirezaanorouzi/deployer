@@ -28,7 +28,9 @@ Optional: [docs/cursor-sdk.md](docs/cursor-sdk.md) — `CURSOR_API_KEY`, default
 
 ### Deploy on Liara
 
-`liara.json` uses `python main.py` on port **8000** and a **data** disk for SQLite. In the Liara app settings set at least **`WORKSPACE_API_KEY`**, **`LIARA_API_TOKEN`**, and your LLM/GitHub keys as needed. If deploy fails with **BUILD_TIMEOUT** or **HTTP error** on `*.liara.run`, open **Logs** in the Liara console — the build often stalls on heavy pip installs or the container exits on startup (missing env, import error).
+`liara.json` uses `python main.py` on port **8000** and a **`data`** disk for SQLite. Set **`WORKSPACE_API_KEY`**, **`LIARA_API_TOKEN`**, and LLM/GitHub keys in the Liara app env.
+
+**Build pauses at `pip` / SQLAlchemy?** That runs on Liara’s build VM, not your machine. The first deploy often waits **3–10 minutes** on `Collecting sqlalchemy` while large wheels download from Liara’s PyPI mirror — it is usually not frozen. `requirements.txt` uses pinned versions (no `uvicorn[standard]`) to speed installs. The deployer terminal shows a heartbeat every ~40s during long pip steps.
 
 ## Publish to GitHub
 

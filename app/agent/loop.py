@@ -56,13 +56,25 @@ async def observe_after_step(
 ) -> StepObservation:
     """LLM reflects on the last tool result and tells the user what happened / what's next."""
     if error:
-        return StepObservation(
-            message=(
-                f"Step **{step_label(step_name)}** failed.\n\n{error}\n\n"
+        persian = any("\u0600" <= c <= "\u06ff" for c in user_goal)
+        err = (error or "").strip()
+        if persian:
+            if "502" in err or "503" in err or "VERIFY_FAILED" in err:
+                message = (
+                    "**بررسی سلامت** ناموفق بود (خطای ۵۰۲/۵۰۳).\n\n"
+                    "معمولاً یعنی کانتینر کرش کرده یا اپ روی پورت درست listen نمی‌کند.\n\n"
+                    "پیشنهاد: لاگ‌های Liara را ببینید، import/startup را درست کنید، "
+                    "و مطمئن شوید اپ روی `0.0.0.0` و پورت محیط `PORT` بالا می‌آید. "
+                    "بعد دوباره در چت بپرسید یا دیپلوی را تکرار کنید."
+                )
+            else:
+                message = f"**{step_label(step_name)}** انجام نشد.\n\n{err}\n\nمی‌توانید بعد از رفع مشکل دوباره پیام بدهید."
+        else:
+            message = (
+                f"Step **{step_label(step_name)}** failed.\n\n{err}\n\n"
                 "You can fix the issue and send another message in chat to retry."
-            ),
-            continue_execution=False,
-        )
+            )
+        return StepObservation(message=message, continue_execution=False)
 
     client = get_llm_client()
     settings = get_settings()

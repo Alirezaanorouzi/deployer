@@ -92,7 +92,7 @@ def _patch_windows_bridge_discovery() -> None:
 _patch_windows_bridge_discovery()
 
 _sdk_executor = concurrent.futures.ThreadPoolExecutor(
-    max_workers=1,
+    max_workers=2,
     thread_name_prefix="cursor-sdk",
 )
 _state_lock = threading.Lock()
@@ -135,6 +135,13 @@ def _client_for_cwd_on_worker(cache_key: str, launch_workspace: str) -> Client:
 
 def _on_sdk_worker_thread() -> bool:
     return threading.current_thread().name.startswith("cursor-sdk")
+
+
+def reset_bridge_client(cache_key: str) -> None:
+    """Drop cached bridge/client after connection loss (caller may launch a fresh one)."""
+    with _state_lock:
+        _bridges.pop(cache_key, None)
+        _clients.pop(cache_key, None)
 
 
 def client_for_cwd(cache_key: str, *, launch_workspace: str | None = None) -> Client:

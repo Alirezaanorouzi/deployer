@@ -1,3 +1,7 @@
-# Local / full UI (Cursor SDK panel). Not needed on Liara production.
+# Local / full UI (Cursor SDK panel). Not installed on Liara (uses requirements.txt only).
 -r requirements.txt
 cursor-sdk>=0.1.0
+# Faster uvicorn --reload locally (omitted from Liara production requirements).
+httptools>=0.6.0
+watchfiles>=0.20
+websockets>=13.0

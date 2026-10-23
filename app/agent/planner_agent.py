@@ -6,6 +6,11 @@ from app.config import get_settings
 from app.llm.chat_json import chat_json_object
 from app.llm.client import get_llm_client
 from app.pipeline_planner import PIPELINE_SKILL
+from app.agent.context_builder import (
+    HISTORY_TURNS_INTENT,
+    build_intent_user_block,
+    trim_history,
+)
 from app.agent.conversation_params import (
     apply_confirm_from_conversation,
     enrich_planner_params,
@@ -48,6 +53,8 @@ REACT_SKILLS = frozenset(
         "liara.resize",
         "liara.deploy",
         "liara.bootstrap",
+        "liara.health",
+        "incident.diagnose",
         "agent.summarize",
         "agent.chat",
     }
@@ -160,7 +167,7 @@ Return ONLY valid JSON (no markdown) with this shape:
   "skill_id": "<one of allowed_skills>",
   "summary_en": "short plan for the user",
   "summary_fa": "خلاصه فارسی",
-  "assistant_message": "friendly explanation of what will happen next",
+  "assistant_message": "one short status line while working (not the final answer): what you are about to check or do",
   "recommendation": "optional infra tip or null",
   "params": {
     "repo": "owner/name — REQUIRED for pipeline.github_to_liara",
@@ -213,19 +220,18 @@ Rules:
 - Use liara.bootstrap for first-time setup / plan advice without an immediate deploy.
 - Use incident.diagnose when the user reports slowness AND wants logs checked, or a broad outage (health + metrics + logs + analysis). Always set params.app_name to the Liara project id.
 - Prefer liara.logs when the user only wants logs without performance investigation.
-- Use liara.health / liara.deploy / liara.bootstrap appropriately.
+- Use liara.health when the user asks how the app is doing, service status, uptime, or "is it up" (سلامت، وضعیت برنامه، بالاست؟). Set params.app_name.
+- Use incident.diagnose when the user reports slowness/outage AND wants investigation (logs + health + analysis).
+- Use liara.deploy / liara.bootstrap appropriately.
 - Pick repo from github_repos_sample when user says "my shop project" etc.; if unclear, use best match or ask in assistant_message.
-- NEVER output API tokens, passwords, or shell commands."""
+- NEVER output API tokens, passwords, or shell commands.
+- user_goal in the final user block is THIS message only; use prior messages in the thread for disambiguation, not to merge old tasks into the new one."""
 
-    user = f"User message:\n{user_message}\n\nContext:\n{json.dumps(context, ensure_ascii=False)}"
+    user = build_intent_user_block(user_message, context)
 
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
-    for item in (conversation_history or [])[-12:]:
-        role = (item.get("role") or "").strip()
-        content = (item.get("content") or "").strip()
-        if role not in ("user", "assistant") or not content:
-            continue
-        messages.append({"role": role, "content": content[:2000]})
+    for item in trim_history(conversation_history, max_turns=HISTORY_TURNS_INTENT):
+        messages.append({"role": item["role"], "content": item["content"]})
 
     messages.append({"role": "user", "content": user})
 

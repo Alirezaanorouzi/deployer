@@ -108,6 +108,21 @@ async def ensure_workspace(
     return cwd
 
 
+def _recoverable_cursor_error(message: str) -> bool:
+    m = (message or "").lower()
+    if "agent" in m and "not found" in m:
+        return True
+    if "bridge request failed" in m:
+        return True
+    if "connection refused" in m or "actively refused" in m:
+        return True
+    if "connecterror" in m or "10061" in m:
+        return True
+    if "connection reset" in m or "broken pipe" in m:
+        return True
+    return False
+
+
 def _chat_turn_sync(
     session: CursorSession,
     user_message: str,
@@ -119,7 +134,7 @@ def _chat_turn_sync(
 ) -> CursorFixResult:
     from cursor_sdk import Agent, AgentOptions, CursorAgentError
 
-    from app.cursor_agent.bridge_client import client_for_cwd
+    from app.cursor_agent.bridge_client import client_for_cwd, reset_bridge_client
     from app.cursor_agent.run_result import fix_result_from_run
     from app.cursor_agent.stream_emit import consume_run
 
@@ -169,7 +184,9 @@ def _chat_turn_sync(
         if emit:
             emit("status", {"text": text})
 
-    try:
+    last_err = ""
+
+    def _run_once() -> object:
         _status("Connecting to Cursor…")
         sdk_client = client_for_cwd(cache_key, launch_workspace=launch)
         if not session.agent_id:
@@ -182,35 +199,66 @@ def _chat_turn_sync(
                 first = f"{preamble}\n\nUser:\n{user_message}"
                 run = agent.send(first)
                 _status("Working…")
-                result = consume_run(run, emit)
-        else:
-            _status("Resuming session…")
-            # Local agents require model (+ local/cloud) on resume/send, not only api_key.
-            with Agent.resume(session.agent_id, opts, client=sdk_client) as agent:
-                run = agent.send(user_message)
-                _status("Working…")
-                result = consume_run(run, emit)
-    except CursorAgentError as e:
-        session.agent_id = None
-        return CursorFixResult(False, "startup_error", e.message, error=e.message)
-    except OSError as e:
-        session.agent_id = None
-        win = getattr(e, "winerror", None)
-        if win == 10038:
-            msg = (
-                "Cursor SDK bridge failed on this host (Windows socket error). "
-                "Ensure Cursor CLI is installed and try restarting the deployer server."
-            )
-        else:
-            msg = f"Cursor SDK OS error: {e}"
-        return CursorFixResult(False, "startup_error", msg, error=msg)
-    except Exception as e:
-        session.agent_id = None
-        msg = str(e) or type(e).__name__
-        return CursorFixResult(False, "startup_error", msg, error=msg)
+                return consume_run(run, emit)
+        _status("Resuming session…")
+        with Agent.resume(session.agent_id, opts, client=sdk_client) as agent:
+            run = agent.send(user_message)
+            _status("Working…")
+            return consume_run(run, emit)
 
-    session.cwd = workspace_label(mode, session.repo, local_cwd)
-    return fix_result_from_run(result)
+    for attempt in range(2):
+        try:
+            result = _run_once()
+            session.cwd = workspace_label(mode, session.repo, local_cwd)
+            return fix_result_from_run(result)
+        except CursorAgentError as e:
+            last_err = e.message
+            if attempt == 0 and _recoverable_cursor_error(last_err):
+                session.agent_id = None
+                reset_bridge_client(cache_key)
+                if emit:
+                    emit("status", {"text": "Reconnecting to Cursor…"})
+                continue
+            session.agent_id = None
+            reset_bridge_client(cache_key)
+            return CursorFixResult(False, "startup_error", last_err, error=last_err)
+        except OSError as e:
+            last_err = str(e) or type(e).__name__
+            win = getattr(e, "winerror", None)
+            if win == 10038:
+                msg = (
+                    "Cursor SDK bridge failed on this host (Windows socket error). "
+                    "Ensure Cursor CLI is installed and try restarting the deployer server."
+                )
+            else:
+                msg = f"Cursor SDK OS error: {e}"
+            if attempt == 0 and _recoverable_cursor_error(last_err):
+                session.agent_id = None
+                reset_bridge_client(cache_key)
+                if emit:
+                    emit("status", {"text": "Reconnecting to Cursor…"})
+                continue
+            session.agent_id = None
+            reset_bridge_client(cache_key)
+            return CursorFixResult(False, "startup_error", msg, error=msg)
+        except Exception as e:
+            last_err = str(e) or type(e).__name__
+            if attempt == 0 and _recoverable_cursor_error(last_err):
+                session.agent_id = None
+                reset_bridge_client(cache_key)
+                if emit:
+                    emit("status", {"text": "Reconnecting to Cursor…"})
+                continue
+            session.agent_id = None
+            reset_bridge_client(cache_key)
+            return CursorFixResult(False, "startup_error", last_err, error=last_err)
+
+    return CursorFixResult(
+        False,
+        "startup_error",
+        last_err or "Cursor connection failed",
+        error=last_err or "BRIDGE_ERROR",
+    )
 
 
 def get_or_create_session(session_id: str | None) -> CursorSession:
@@ -249,14 +297,27 @@ async def chat_turn(
     session = get_or_create_session(session_id)
     mode = cursor_runtime_mode()
     if mode == "local":
+        if repo:
+            session.repo = repo
         try:
-            await ensure_workspace(session, run_id=run_id, repo=repo)
+            await ensure_workspace(session, run_id=run_id, repo=repo or session.repo)
         except Exception as e:
             return {
                 "ok": False,
                 "session_id": session.session_id,
                 "error": str(e),
                 "reply": "",
+            }
+        if not (session.cwd or "").strip():
+            msg = (
+                "No workspace: pick a repository in the toolbar (top left), "
+                "or run a deploy so a clone exists."
+            )
+            return {
+                "ok": False,
+                "session_id": session.session_id,
+                "error": "NO_WORKSPACE",
+                "reply": msg,
             }
     else:
         if repo:

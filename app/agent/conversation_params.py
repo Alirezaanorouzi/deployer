@@ -67,26 +67,86 @@ def is_advisory_followup(user_message: str, history: list[dict[str, str]] | None
 
 
 def conversation_text(user_message: str, history: list[dict[str, str]] | None) -> str:
-    parts: list[str] = []
-    for item in history or []:
-        role = (item.get("role") or "").strip()
-        if role in ("user", "assistant"):
-            parts.append((item.get("content") or "").strip())
-    parts.append(user_message.strip())
-    return "\n".join(p for p in parts if p)
+    """Legacy: full transcript string. Prefer text_for_param_inference for slot filling."""
+    return text_for_param_inference(user_message, history)
+
+
+def text_for_param_inference(user_message: str, history: list[dict[str, str]] | None) -> str:
+    """Regex/slot inference: current message; plus only the last prior user line for short continuations."""
+    msg = (user_message or "").strip()
+    if not history:
+        return msg
+    if looks_like_independent_turn(msg):
+        return msg
+    if message_affirms_write(msg) or len(msg) <= 36:
+        for item in reversed(history):
+            if (item.get("role") or "").strip() == "user":
+                prev = (item.get("content") or "").strip()
+                if prev and prev != msg:
+                    return prev + "\n" + msg
+                break
+    return msg
+
+
+_INDEPENDENT_TURN_MARKERS = (
+    "?",
+    "؟",
+    "ببین",
+    "چک کن",
+    "چک ",
+    "check ",
+    "show ",
+    "list ",
+    "آیا",
+    "چند",
+    "چنتا",
+    "how many",
+    "تنظیم",
+    "ست شده",
+    "نشده",
+    "نبود",
+    "وجود",
+    "github",
+    "گیت",
+    "git ",
+    "توکن",
+    "token",
+    "دیسک",
+    "disk",
+    "لاگ",
+    "log",
+    "deploy",
+    "دیپلوی",
+    "domain",
+    "دامنه",
+    "restart",
+    "ریستارت",
+    "balance",
+    "موجودی",
+    "متغیر",
+    "env ",
+    "environment",
+)
+
+
+def looks_like_independent_turn(user_message: str) -> bool:
+    """New question or task in chat — do not merge with the previous user turn."""
+    raw = (user_message or "").strip()
+    if not raw:
+        return False
+    if message_affirms_write(raw) and len(raw) <= 56:
+        return False
+    low = raw.lower()
+    if "?" in raw or "؟" in raw:
+        return True
+    return any(m in low or m in raw for m in _INDEPENDENT_TURN_MARKERS)
 
 
 def compose_user_goal(user_message: str, history: list[dict[str, str]] | None) -> str:
-    if not history:
-        return user_message
-    if is_advisory_followup(user_message, history):
-        return user_message.strip()
-    if len(user_message.strip()) > 80:
-        return user_message
-    for item in reversed(history):
-        if (item.get("role") or "").strip() == "user" and len((item.get("content") or "")) > 20:
-            return (item.get("content") or "").strip() + "\n[ادامه]: " + user_message.strip()
-    return user_message
+    """ReAct user_goal is always the current message; history is passed separately to the LLM."""
+    from app.agent.context_builder import current_user_goal
+
+    return current_user_goal(user_message)
 
 
 def message_affirms_write(text: str) -> bool:
@@ -417,7 +477,7 @@ def enrich_common_params(
     liara_projects: list[str] | None = None,
     default_app: str | None = None,
 ) -> None:
-    combined = conversation_text(user_message, conversation_history)
+    combined = text_for_param_inference(user_message, conversation_history)
     if not params.get("app_name"):
         app = (
             infer_app_name(combined, liara_projects)
@@ -477,7 +537,7 @@ def enrich_planner_params(
     if skill_id in ("liara.deploy", "pipeline.github_to_liara", "liara.bootstrap"):
         enrich_deploy_params(user_message, params, github_repos)
         enrich_deploy_params(
-            conversation_text(user_message, conversation_history),
+            text_for_param_inference(user_message, conversation_history),
             params,
             github_repos,
         )

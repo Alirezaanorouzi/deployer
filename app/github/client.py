@@ -1,9 +1,8 @@
 import base64
 from typing import Any
 
-import httpx
-
 from app.config import get_settings
+from app.http_client import async_client
 
 
 class GitHubError(Exception):
@@ -31,7 +30,7 @@ class GitHubClient:
         if not self._token:
             raise GitHubError("AUTH_MISSING", "GITHUB_TOKEN is not configured")
         url = f"{self._base}{path}"
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with async_client(timeout=60) as client:
             r = await client.request(method, url, headers=self._headers(), **kwargs)
         if r.status_code == 401:
             raise GitHubError("AUTH_FAILED", "Invalid GitHub token")

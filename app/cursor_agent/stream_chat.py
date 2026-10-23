@@ -38,8 +38,10 @@ async def stream_chat_events(
     mode = cursor_runtime_mode()
 
     if mode == "local":
+        if repo:
+            session.repo = repo
         try:
-            await ensure_workspace(session, run_id=run_id, repo=repo)
+            await ensure_workspace(session, run_id=run_id, repo=repo or session.repo)
         except Exception as e:
             yield "error", {"text": str(e)}
             yield "done", {
@@ -47,6 +49,20 @@ async def stream_chat_events(
                 "session_id": session.session_id,
                 "error": str(e),
                 "reply": "",
+            }
+            return
+        if not (session.cwd or "").strip():
+            err = (
+                "No workspace: pick a repository in the toolbar (top left), "
+                "or run a deploy so a clone exists. If the repo list is empty, "
+                "check GITHUB_TOKEN in .env and restart the server."
+            )
+            yield "error", {"text": err}
+            yield "done", {
+                "ok": False,
+                "session_id": session.session_id,
+                "error": "NO_WORKSPACE",
+                "reply": err,
             }
             return
     else:
@@ -82,14 +98,27 @@ async def stream_chat_events(
 
     async def worker():
         try:
-            return await run_on_sdk_thread(
-                _chat_turn_sync,
-                session,
-                message.strip(),
-                deploy_log=merged_log or None,
-                run_id=run_id,
-                repo=repo,
-                emit=emit,
+            return await asyncio.wait_for(
+                run_on_sdk_thread(
+                    _chat_turn_sync,
+                    session,
+                    message.strip(),
+                    deploy_log=merged_log or None,
+                    run_id=run_id,
+                    repo=repo,
+                    emit=emit,
+                ),
+                timeout=900.0,
+            )
+        except asyncio.TimeoutError:
+            emit("error", {"text": "Cursor run timed out after 15 minutes."})
+            from app.cursor_agent.client import CursorFixResult
+
+            return CursorFixResult(
+                False,
+                "timeout",
+                "Cursor run timed out.",
+                error="TIMEOUT",
             )
         except Exception as e:
             emit("error", {"text": str(e)})

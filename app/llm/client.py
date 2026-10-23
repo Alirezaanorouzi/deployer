@@ -13,7 +13,14 @@ class LlmNotConfiguredError(RuntimeError):
 @lru_cache
 def _openai_client_cached(api_key: str, base_url: str) -> AsyncOpenAI:
     timeout = httpx.Timeout(connect=15.0, read=90.0, write=30.0, pool=15.0)
-    return AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout, max_retries=1)
+    http = httpx.AsyncClient(trust_env=False, timeout=timeout)
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+        max_retries=1,
+        http_client=http,
+    )
 
 
 def get_llm_client() -> AsyncOpenAI:

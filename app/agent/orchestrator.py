@@ -4,6 +4,9 @@
 2. Intent — `plan_with_agent` once (skill_id + params).
 3. Loop — `plan_next_step` → tool → observations → repeat.
 4. Harness — confirm_write, deploy ordering, failure recovery (not keyword pipelines).
+
+LLM context is built in `app.agent.context_builder`: current user_goal, trimmed history,
+tool observations, and planner_params — not a single concatenated transcript string.
 """
 
 import re

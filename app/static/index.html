@@ -232,12 +232,51 @@
       resize: none;
       border-radius: 8px;
     }
-    .cursor-composer button#cursorSend {
+    .composer-send-btn {
       margin: 0;
       flex-shrink: 0;
-      padding: 0.5rem 0.85rem;
-      font-size: 0.8rem;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: #6a7a92;
+      border: none;
       border-radius: 8px;
+      cursor: pointer;
+      font-weight: 400;
+      line-height: 0;
+    }
+    .composer-send-btn:hover:not(:disabled) {
+      color: #9eb0c8;
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .composer-send-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .composer-send-btn.is-stop {
+      color: #9a8a8a;
+    }
+    .composer-send-btn.is-stop:hover:not(:disabled) {
+      color: #c4a0a0;
+    }
+    .composer-send-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .composer-send-btn svg.icon-stop {
+      fill: currentColor;
+      stroke: none;
+      width: 14px;
+      height: 14px;
     }
     .cursor-status {
       font-size: 0.68rem;
@@ -402,7 +441,6 @@
     }
     .composer-row { display: flex; align-items: center; justify-content: space-between; margin-top: 0.5rem; gap: 0.5rem; }
     .composer-hint { font-size: 0.7rem; color: #5c6b80; }
-    .chat-composer #chatSend { margin: 0; padding: 0.45rem 1rem; font-size: 0.85rem; border-radius: 8px; }
     .terminal-card {
       flex: 1;
       display: flex;
@@ -547,7 +585,7 @@
           <div class="cursor-composer">
             <div class="cursor-composer-row">
               <textarea id="cursorInput" rows="2" placeholder="Message Cursor…"></textarea>
-              <button type="button" id="cursorSend">Send</button>
+              <button type="button" id="cursorSend" class="composer-send-btn" aria-label="Send" title="Send"></button>
             </div>
           </div>
         </section>
@@ -589,7 +627,7 @@
           <textarea id="message" rows="3" placeholder="Deploy, logs, health checks…"></textarea>
           <div class="composer-row">
             <span class="composer-hint">Enter to send · Shift+Enter for newline</span>
-            <button type="button" id="chatSend">Send</button>
+            <button type="button" id="chatSend" class="composer-send-btn" aria-label="Send" title="Send"></button>
           </div>
         </div>
       </aside>
@@ -603,6 +641,27 @@
     let chatPendingTurn = null;
     let agentStreamActive = false;
     let agentThinkingText = '';
+    function composerSendIconHtml() {
+      return '<svg class="icon-send" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M12 6l-5.5 5M12 6l5.5 5"/></svg>';
+    }
+    function composerStopIconHtml() {
+      return '<svg class="icon-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="8" height="8" rx="1.5"/></svg>';
+    }
+    function setComposerSendButton(btn, mode) {
+      if (!btn) return;
+      const stop = mode === 'stop';
+      btn.classList.toggle('is-stop', stop);
+      btn.dataset.mode = stop ? 'stop' : 'send';
+      btn.setAttribute('aria-label', stop ? 'Stop' : 'Send');
+      btn.title = stop ? 'Stop' : 'Send';
+      btn.innerHTML = stop ? composerStopIconHtml() : composerSendIconHtml();
+    }
+    function initComposerSendButtons() {
+      setComposerSendButton(document.getElementById('cursorSend'), 'send');
+      setComposerSendButton(document.getElementById('chatSend'), 'send');
+    }
+    initComposerSendButtons();
+
     const CHAT_STORAGE_KEY = 'deployer_chat_v1';
     const CHAT_MAX_TURNS = 20;
     const REPO_STORAGE_KEY = 'deployer_selected_repo';
@@ -879,7 +938,11 @@
     function deployChatLineFromLog(line) {
       const t = stripAnsi(line).trim();
       if (!t) return '';
-      if (t.startsWith('— Liara CLI')) return t;
+      if (t.startsWith('— Liara CLI') || t.startsWith('— Liara build')) return t;
+      if (/installing dependencies using pip/i.test(t)) {
+        return 'Liara: installing Python packages (first build can take several minutes)…';
+      }
+      if (/^Collecting sqlalchemy/i.test(t)) return 'Liara: downloading SQLAlchemy (large package, please wait)…';
       if (/deployment finished successfully/i.test(t)) return t;
       if (/build finished|upload finished|release created|creating an archive|checking container/i.test(t)) return t;
       if (/^https?:\/\//i.test(t)) return t;
@@ -919,7 +982,7 @@
       renderChatThread();
     }
 
-    function appendStreamTokenToLatestAssistant(delta, streamStart, newBlock) {
+    function appendStreamTokenToLatestAssistant(delta, streamStart, newBlock, replace) {
       if (!delta && !streamStart) return;
       const memory = loadChatMemory();
       for (let i = memory.length - 1; i >= 0; i--) {
@@ -928,6 +991,7 @@
           memory[i].agentLive = true;
           memory[i].streaming = true;
           let base = memory[i].assistant === 'Thinking…' ? '' : memory[i].assistant;
+          if (streamStart && replace) base = '';
           if (streamStart) {
             if (newBlock && base) base += '\n\n';
             memory[i].assistant = base + (delta || '');
@@ -1008,6 +1072,11 @@
     let cursorActivityEl = null;
     let cursorHeartbeatTimer = null;
     let cursorStickToBottom = true;
+    let cursorChatInFlight = false;
+    let cursorStreamGeneration = 0;
+    let cursorStreamAbort = null;
+    let agentChatInFlight = false;
+    let agentChatAbort = null;
 
     const CURSOR_RTL_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
 
@@ -1063,8 +1132,31 @@
       return div;
     }
 
+    function cursorStreamNode(streamGen) {
+      if (streamGen != null) {
+        if (cursorStreamEl && cursorStreamEl.dataset.streamGen === String(streamGen)) {
+          return cursorStreamEl;
+        }
+        return document.querySelector('.cursor-msg.streaming[data-stream-gen="' + streamGen + '"]');
+      }
+      return cursorStreamEl;
+    }
+
+    function isTransientCursorError(text) {
+      const t = (text || '').toLowerCase();
+      return (
+        t.includes('bridge request failed') ||
+        t.includes('not found') ||
+        t.includes('10061') ||
+        t.includes('connection refused') ||
+        t.includes('connecterror')
+      );
+    }
+
     function beginCursorStream() {
+      const gen = ++cursorStreamGeneration;
       cursorStreamEl = appendCursorMsg('assistant', '');
+      cursorStreamEl.dataset.streamGen = String(gen);
       cursorStreamEl.classList.add('streaming');
       cursorStreamEl.textContent = '';
       cursorActivityEl = document.createElement('div');
@@ -1075,6 +1167,7 @@
       cursorStreamEl.appendChild(cursorStreamBody);
       pushCursorActivity('Connecting…');
       scrollCursorThread({ force: true, smooth: true });
+      return gen;
     }
 
     function pushCursorActivity(text) {
@@ -1112,41 +1205,61 @@
       }, 40000);
     }
 
-    function endCursorStream(ok, reply, errText) {
+    function endCursorStream(ok, reply, errText, streamGen) {
       stopCursorHeartbeat();
-      const finalText = (reply || errText || '').trim();
-      if (!cursorStreamEl) {
-        if (!ok) appendCursorMsg('error', finalText || 'Cursor run failed');
+      const el = cursorStreamNode(streamGen);
+      const body = el ? el.querySelector('.cursor-stream-body') : cursorStreamBody;
+      const activity = el ? el.querySelector('.cursor-activity') : cursorActivityEl;
+      const streamed = (body && body.textContent || '').trim();
+      let finalOk = !!ok;
+      let finalText = (reply || '').trim();
+      const err = (errText || '').trim();
+      if (!finalOk) {
+        if (streamed && (finalText ? streamed.length >= finalText.length * 0.4 : true)) {
+          if (!finalText || streamed.length >= finalText.length) finalText = streamed;
+          else finalText = finalText || streamed;
+          finalOk = true;
+        } else if (streamed && isTransientCursorError(err)) {
+          finalText = streamed;
+          finalOk = true;
+        } else {
+          finalText = err || finalText || 'Cursor run failed';
+        }
+      }
+      if (!el) {
+        if (!finalOk) appendCursorMsg('error', finalText || 'Cursor run failed');
         else if (finalText) appendCursorMsg('assistant', finalText);
         return;
       }
-      cursorStreamEl.classList.remove('streaming');
-      if (!ok) {
-        cursorStreamEl.classList.add('error');
-        cursorStreamEl.classList.remove('assistant');
-        if (cursorActivityEl) cursorActivityEl.remove();
-        if (cursorStreamBody) {
-          cursorStreamBody.textContent = finalText || 'Cursor run failed';
-          applyCursorTextDir(cursorStreamBody, cursorStreamBody.textContent);
+      el.classList.remove('streaming');
+      if (!finalOk) {
+        el.classList.add('error');
+        el.classList.remove('assistant');
+        if (activity) activity.remove();
+        if (body) {
+          body.textContent = finalText || 'Cursor run failed';
+          applyCursorTextDir(body, body.textContent);
         } else {
-          cursorStreamEl.textContent = finalText || 'Cursor run failed';
-          applyCursorTextDir(cursorStreamEl, cursorStreamEl.textContent);
+          el.textContent = finalText || 'Cursor run failed';
+          applyCursorTextDir(el, el.textContent);
         }
       } else if (finalText) {
-        if (cursorActivityEl) cursorActivityEl.remove();
-        if (cursorStreamBody) {
-          cursorStreamBody.textContent = finalText;
-          applyCursorTextDir(cursorStreamBody, finalText);
-          applyCursorTextDir(cursorStreamEl, finalText);
+        if (activity) activity.remove();
+        if (body) {
+          body.textContent = finalText;
+          applyCursorTextDir(body, finalText);
+          applyCursorTextDir(el, finalText);
         } else {
-          cursorStreamEl.textContent = finalText;
-          applyCursorTextDir(cursorStreamEl, finalText);
+          el.textContent = finalText;
+          applyCursorTextDir(el, finalText);
         }
       }
       scrollCursorThread({ force: true, smooth: true });
-      cursorStreamEl = null;
-      cursorStreamBody = null;
-      cursorActivityEl = null;
+      if (el === cursorStreamEl) {
+        cursorStreamEl = null;
+        cursorStreamBody = null;
+        cursorActivityEl = null;
+      }
     }
 
     function consumeSseBuffer(buffer, onEvent) {
@@ -1199,6 +1312,10 @@
       }
     }
 
+    function stopCursorChat() {
+      if (cursorStreamAbort) cursorStreamAbort.abort();
+    }
+
     async function sendCursorChat(options = {}) {
       const input = document.getElementById('cursorInput');
       const useServerLog = !!options.useServerTerminalLog;
@@ -1223,21 +1340,23 @@
         ? msg + '\n\n↳ terminal log (' + logLineCount + ' lines from server)'
         : msg;
       appendCursorMsg('user', userLabel);
-      beginCursorStream();
+      let streamGen = beginCursorStream();
       startCursorHeartbeat();
 
       const btn = document.getElementById('cursorSend');
       const termBtn = document.getElementById('terminalToCursor');
-      btn.disabled = true;
       if (termBtn) termBtn.disabled = true;
-      const prevBtnLabel = btn.textContent;
-      btn.textContent = '…';
+      cursorChatInFlight = true;
+      cursorStreamAbort = new AbortController();
+      setComposerSendButton(btn, 'stop');
+      btn.disabled = false;
       const repo = document.getElementById('ghRepo').value.trim() || null;
       let donePayload = null;
       try {
         const res = await fetch('/cursor/chat/stream', {
           method: 'POST',
           headers: headers(),
+          signal: cursorStreamAbort.signal,
           body: JSON.stringify({
             message: msg,
             session_id: cursorSessionId() || null,
@@ -1249,7 +1368,7 @@
         });
         if (!res.ok || !res.body) {
           const raw = await res.text();
-          endCursorStream(false, '', raw.slice(0, 500) || ('HTTP ' + res.status));
+          endCursorStream(false, '', raw.slice(0, 500) || ('HTTP ' + res.status), streamGen);
         } else {
           const reader = res.body.getReader();
           const dec = new TextDecoder();
@@ -1278,7 +1397,8 @@
             endCursorStream(
               !!donePayload.ok,
               donePayload.reply || '',
-              donePayload.reply || donePayload.error || 'Cursor run failed',
+              donePayload.ok ? '' : (donePayload.error || 'Cursor run failed'),
+              streamGen,
             );
             if (donePayload.workspace) {
               const ws = String(donePayload.workspace);
@@ -1286,15 +1406,18 @@
               document.getElementById('cursorStatus').textContent = 'Workspace · ' + label;
             }
           } else {
-            endCursorStream(false, '', 'Stream ended without a result');
+            endCursorStream(false, '', 'Stream ended without a result', streamGen);
           }
         }
       } catch (e) {
-        endCursorStream(false, '', String(e.message || e));
+        const stopped = e && e.name === 'AbortError';
+        endCursorStream(false, '', stopped ? 'Stopped.' : String(e.message || e), streamGen);
       } finally {
+        cursorChatInFlight = false;
+        cursorStreamAbort = null;
         stopCursorHeartbeat();
         btn.disabled = false;
-        btn.textContent = prevBtnLabel || 'Send';
+        setComposerSendButton(btn, 'send');
         syncTerminalToCursorButton();
       }
       return true;
@@ -1329,7 +1452,13 @@
       refreshCursorStatus();
     }
 
-    document.getElementById('cursorSend').onclick = () => { sendCursorChat(); };
+    document.getElementById('cursorSend').onclick = () => {
+      if (cursorChatInFlight) {
+        stopCursorChat();
+        return;
+      }
+      sendCursorChat();
+    };
     document.getElementById('terminalToCursor').onclick = () => { sendTerminalToCursor(); };
     document.getElementById('cursorNewSession').onclick = newCursorSession;
     document.getElementById('cursorInput').addEventListener('keydown', e => {
@@ -1469,15 +1598,14 @@
         const d = JSON.parse(e.data);
         const text = d.text || '';
         if (d.stream) {
-          appendStreamTokenToLatestAssistant(text, !!d.stream_start, !!d.new_block);
+          appendStreamTokenToLatestAssistant(text, !!d.stream_start, !!d.new_block, !!d.replace);
           return;
         }
         if (d.append) appendToLatestAssistant(text);
-        else if (loadChatMemory().some(t => t.pending)) finishChatTurn(text, { agentLive: true });
         else if (text) {
-          patchLatestAssistant(text);
-          const m = loadChatMemory();
-          if (m.length) { m[m.length - 1].agentLive = true; saveChatMemory(m); renderChatThread(); }
+          const pending = loadChatMemory().some(t => t.pending);
+          if (pending) setAgentThinking(text);
+          else patchLatestAssistant(text);
         }
         if (text && !d.stream) term('Agent: ' + text);
       });
@@ -1496,7 +1624,18 @@
       });
       eventSource.addEventListener('site_url', e => {
         const d = JSON.parse(e.data);
-        showSite(d.url);
+        if (d.url) {
+          showSite(d.url);
+          const mem = loadChatMemory();
+          if (mem.length && mem[mem.length - 1].pending) {
+            const line = 'Deploy finished — site: ' + d.url;
+            if (!mem[mem.length - 1].assistant.includes(d.url)) {
+              mem[mem.length - 1].assistant = line;
+              saveChatMemory(mem);
+              renderChatThread();
+            }
+          }
+        }
       });
       eventSource.addEventListener('succeeded', e => {
         const d = JSON.parse(e.data);
@@ -1512,8 +1651,10 @@
           if (summary && (stuck || !last.streaming)) {
             if (last.pending || last.assistant === 'Thinking…' || !last.assistant?.trim()) {
               finishChatTurn(summary, { agentLive: false });
-            } else if (!last.streaming) {
-              appendToLatestAssistant(summary);
+            } else if (last.streaming) {
+              finishChatTurn(summary, { agentLive: false });
+            } else if (!last.assistant.includes(summary.slice(0, 48))) {
+              finishChatTurn(summary, { agentLive: false });
             }
           } else if (last.pending && summary) {
             finishChatTurn(summary, { agentLive: false });
@@ -1533,6 +1674,7 @@
         }
         term('— run succeeded —');
         renderChatThread();
+        onAgentRunSettled();
         pollRun(runId);
       });
       eventSource.addEventListener('run_error', e => {
@@ -1546,6 +1688,7 @@
         agentThinkingText = '';
         term('— run failed —');
         renderChatThread();
+        onAgentRunSettled();
         pollRun(runId);
       });
     }
@@ -1579,17 +1722,13 @@
       if (run.site_url) showSite(run.site_url);
       const mem = loadChatMemory();
       const lastTurn = mem.length ? mem[mem.length - 1] : null;
-      if (run.agent_message && !agentStreamActive && !(lastTurn && lastTurn.streaming)) {
+      if (
+        run.agent_message &&
+        !agentStreamActive &&
+        !(lastTurn && lastTurn.streaming) &&
+        !(lastTurn && lastTurn.pending)
+      ) {
         patchLatestAssistant(run.agent_message);
-      }
-      if (run.state === 'executing' && lastTurn && lastTurn.pending && run.agent_message) {
-        const base = lastTurn.assistant === 'Thinking…' ? '' : lastTurn.assistant;
-        if (!base.includes(run.agent_message.slice(0, 40))) {
-          lastTurn.assistant = (base ? base + '\n\n' : '') + run.agent_message;
-          lastTurn.agentLive = true;
-          saveChatMemory(mem);
-          renderChatThread();
-        }
       }
       if (run.state === 'awaiting_approval') {
         document.getElementById('approvalBar').style.display = 'block';
@@ -1605,7 +1744,10 @@
       if (run.state === 'cancelled' && mem.length && mem[mem.length - 1].pending) {
         finishChatTurn(run.result_summary || run.error_message || 'Run cancelled.', { agentLive: false });
       }
-      if (TERMINAL_RUN_STATES.has(run.state)) stopRunPolling();
+      if (TERMINAL_RUN_STATES.has(run.state)) {
+        stopRunPolling();
+        onAgentRunSettled();
+      }
       return run;
     }
 
@@ -1619,7 +1761,34 @@
       startRunPolling(currentRunId);
     };
 
+    async function stopAgentChat() {
+      if (agentChatAbort) agentChatAbort.abort();
+      agentChatAbort = null;
+      if (currentRunId) {
+        await fetch('/runs/' + encodeURIComponent(currentRunId) + '/cancel', {
+          method: 'POST',
+          headers: headers(),
+        }).catch(() => {});
+      }
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      agentStreamActive = false;
+      agentThinkingText = '';
+      stopRunPolling();
+      finishChatTurn('Stopped.', { agentLive: false });
+      agentChatInFlight = false;
+      const btn = document.getElementById('chatSend');
+      setComposerSendButton(btn, 'send');
+      btn.disabled = false;
+    }
+
     async function sendChat() {
+      if (agentChatInFlight) {
+        await stopAgentChat();
+        return;
+      }
       const input = document.getElementById('message');
       const userText = input.value.trim();
       if (!userText) return;
@@ -1627,23 +1796,47 @@
       appendChatTurn(userText);
       clearTerm();
       const started = Date.now();
-      const res = await fetch('/chat', {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({
-          message: userText,
-          app: document.getElementById('liaraApp').value.trim() || null,
-          target_env: 'staging',
-          history: chatHistoryForApi(),
-        }),
-      });
+      const chatBtn = document.getElementById('chatSend');
+      agentChatInFlight = true;
+      agentChatAbort = new AbortController();
+      setComposerSendButton(chatBtn, 'stop');
+      chatBtn.disabled = false;
+      let res;
+      try {
+        res = await fetch('/chat', {
+          method: 'POST',
+          headers: headers(),
+          signal: agentChatAbort.signal,
+          body: JSON.stringify({
+            message: userText,
+            app: document.getElementById('liaraApp').value.trim() || null,
+            target_env: 'staging',
+            history: chatHistoryForApi(),
+          }),
+        });
+      } catch (e) {
+        agentChatInFlight = false;
+        agentChatAbort = null;
+        setComposerSendButton(chatBtn, 'send');
+        if (e && e.name === 'AbortError') {
+          finishChatTurn('Stopped.', { agentLive: false });
+        } else {
+          finishChatTurn('Something went wrong: ' + (e.message || e), { agentLive: false });
+        }
+        return;
+      }
       const run = await res.json();
       if (!res.ok) {
         const err = typeof run.detail === 'string' ? run.detail : JSON.stringify(run.detail || run);
         finishChatTurn('Something went wrong: ' + err, { agentLive: false });
         term('Error: ' + err);
+        agentChatInFlight = false;
+        agentChatAbort = null;
+        setComposerSendButton(chatBtn, 'send');
         return;
       }
+      agentChatAbort = null;
+      setComposerSendButton(chatBtn, 'stop');
       currentRunId = run.id;
       connectStream(run.id);
       if (run.agent_message && isStreamingSkill(run.skill_id)) {
@@ -1666,7 +1859,22 @@
       pollRun(run.id);
     }
 
-    document.getElementById('chatSend').onclick = sendChat;
+    function onAgentRunSettled() {
+      if (!agentChatInFlight) return;
+      agentChatInFlight = false;
+      agentChatAbort = null;
+      const chatBtn = document.getElementById('chatSend');
+      setComposerSendButton(chatBtn, 'send');
+      chatBtn.disabled = false;
+    }
+
+    document.getElementById('chatSend').onclick = () => {
+      if (agentChatInFlight) {
+        stopAgentChat();
+        return;
+      }
+      sendChat();
+    };
     document.getElementById('message').addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();

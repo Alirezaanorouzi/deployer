@@ -6,9 +6,8 @@ import zipfile
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-import httpx
-
 from app.config import get_settings
+from app.http_client import async_client
 from app.repo.paths import deploy_root, normalize_github_repo, repo_clone_dir
 from app.sandbox.docker_runner import run_in_sandbox
 
@@ -155,7 +154,7 @@ async def _clone_via_github_zipball(
     }
     branches = ("main", "master")
     last_err = ""
-    async with httpx.AsyncClient(follow_redirects=True, timeout=120) as client:
+    async with async_client(follow_redirects=True, timeout=120) as client:
         for branch in branches:
             url = f"https://api.github.com/repos/{owner}/{repo}/zipball/{branch}"
             await _safe_log(on_log, f"$ curl -L github zipball ({branch})")
@@ -333,10 +332,14 @@ def write_liara_config(root: Path, app_name: str, analysis: dict[str, Any]) -> s
         try:
             obj = json.loads(liara_path.read_text(encoding="utf-8"))
             obj["app"] = app_name
-            if analysis.get("stack") == "python" and not obj.get("args"):
-                obj.setdefault("platform", "python")
-                obj.setdefault("port", 8000)
-                obj["args"] = ["uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+            if analysis.get("stack") == "python":
+                if not obj.get("args"):
+                    obj.setdefault("platform", "python")
+                    obj.setdefault("port", 8000)
+                    obj["args"] = ["uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+                # Writable storage uses DATA_DIR / paths.data_root() (/tmp fallback).
+                # liara.json disk mounts require create_app_disk before deploy.
+                obj.pop("disks", None)
             liara_path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
             return f"Updated {liara_path} (app={app_name})"
         except json.JSONDecodeError:

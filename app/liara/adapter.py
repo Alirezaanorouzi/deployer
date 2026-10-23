@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from app.config import get_settings
+from app.http_client import async_client
 from app.liara.cli import LiaraCli, OnLine
 from app.liara.projects import project_ids_from_list_payload, resolve_project_id
 from app.liara.redact import redact, sanitize_liara_project
@@ -77,7 +78,7 @@ class LiaraAdapter:
         team_scope: bool = True,
     ) -> httpx.Response:
         merged = {**(params or {}), **self._team_query(enabled=team_scope)}
-        async with httpx.AsyncClient(timeout=45) as client:
+        async with async_client(timeout=45) as client:
             return await client.get(f"{self._base}{path}", headers=self._headers(), params=merged)
 
     async def _post_json(
@@ -90,7 +91,7 @@ class LiaraAdapter:
         headers = {**self._headers(), "Content-Type": "application/json"}
         payload = dict(body or {})
         params = self._team_query(enabled=team_scope)
-        async with httpx.AsyncClient(timeout=90) as client:
+        async with async_client(timeout=90) as client:
             return await client.post(
                 f"{self._base}{path}",
                 headers=headers,
@@ -105,7 +106,7 @@ class LiaraAdapter:
         team_scope: bool = True,
     ) -> httpx.Response:
         params = self._team_query(enabled=team_scope)
-        async with httpx.AsyncClient(timeout=90) as client:
+        async with async_client(timeout=90) as client:
             return await client.delete(
                 f"{self._base}{path}",
                 headers=self._headers(),
@@ -120,7 +121,7 @@ class LiaraAdapter:
     ) -> httpx.Response:
         headers = {**self._headers(), "Content-Type": "application/json"}
         params = self._team_query(enabled=team_scope)
-        async with httpx.AsyncClient(timeout=90) as client:
+        async with async_client(timeout=90) as client:
             return await client.post(
                 f"{self._base}{path}",
                 headers=headers,
@@ -517,6 +518,7 @@ class LiaraAdapter:
             on_line=on_line,
             sandbox_run_id=None,
             cwd=deploy_cwd,
+            timeout=1800,
         )
         if res.exit_code == 124:
             return AdapterResult(False, "BUILD_TIMEOUT", res.stderr or res.stdout)
@@ -558,7 +560,7 @@ class LiaraAdapter:
 
     async def health_http(self, url: str) -> AdapterResult:
         try:
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            async with async_client(timeout=30, follow_redirects=True) as client:
                 r = await client.get(url)
             ok = r.status_code < 500
             return AdapterResult(
@@ -593,7 +595,7 @@ class LiaraAdapter:
         since_hours = max(0.25, min(float(since_hours), 168.0))
         since_ts = int(time.time() - since_hours * 3600)
         try:
-            async with httpx.AsyncClient(timeout=45) as client:
+            async with async_client(timeout=45) as client:
                 r = await client.get(
                     f"{self._base}/v1/projects/{project_id}/metrics/{metric}",
                     headers=self._headers(),

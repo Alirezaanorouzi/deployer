@@ -1,8 +1,10 @@
-fastapi>=0.115.0
-uvicorn[standard]>=0.32.0
-sqlalchemy>=2.0.36
-pydantic>=2.10.0
-pydantic-settings>=2.6.0
-httpx>=0.28.0
-python-multipart>=0.0.17
-openai>=1.55.0
+# Pinned for fast Liara builds (loose >= caused long pip resolver stalls on the platform mirror).
+# No uvicorn[standard] — production does not need watchfiles/reload extras.
+fastapi==0.161.1
+uvicorn==0.54.0
+sqlalchemy==2.0.36
+pydantic==2.10.6
+pydantic-settings==2.7.1
+httpx==0.28.1
+python-multipart==0.0.20
+openai==1.60.0

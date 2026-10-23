@@ -4,6 +4,15 @@ import asyncio
 import json
 from typing import Any
 
+from app.agent.context_builder import (
+    CHAT_ONLY_SYSTEM,
+    REACT_PLANNER_SYSTEM,
+    REPLY_SYSTEM,
+    build_chat_payload,
+    build_judge_payload,
+    build_react_planner_payload,
+    build_reply_payload,
+)
 from app.agent.conversation_params import enrich_planner_params
 from app.agent.deploy_params import enrich_deploy_params, infer_deploy_repo
 from app.agent.failure_harness import (
@@ -42,49 +51,18 @@ async def plan_next_step(
 ) -> dict[str, Any]:
     """Single LLM call per loop iteration: choose tool, clarify, or finish from observations."""
     catalog = [t for t in list_tool_catalog() if t["id"] in allowed_tool_ids]
-    system = """You are the step planner for a Liara DevOps agent (tools-in-a-loop).
-Given the user goal, chat history, planner_params, and tool observations, pick the NEXT action.
-
-Return ONLY JSON:
-{
-  "action": "call_tool" | "finish" | "clarify",
-  "tool_id": "<id from allowed_tools or null>",
-  "tool_params": {},
-  "message": "user-facing text when action is finish or clarify"
-}
-
-Core rules:
-- Read observations before deciding. Do not invent API data not present in observations.
-- finish: goal is answered OR user only needs advice from observations/history (e.g. "what should I do now?" after a failed deploy).
-- clarify: missing required param (app_name, repo, env_key, confirm_write) and no tool can proceed.
-- call_tool: one tool that moves toward the goal.
-- Merge app_name, repo, env_key, confirm_write, since_hours from planner_params into tool_params when relevant.
-- Do not repeat the same successful tool with identical params.
-
-Writes (restart, env, disk, domain, deploy_service, …): only call with confirm_write true after user explicitly approved in chat.
-
-Skill recipes (use skill_id + observations):
-- liara.deploy: clone_github → prepare_deploy_workspace → create_app → deploy_service → get_app_url → verify_app_health; on deploy/5xx failure → diagnose_deploy_health; never finish after create_app alone.
-- liara.settings: get_app_settings to inspect env keys; update_env_variables only after confirm_write; check-then-set env vars in two steps when needed.
-- liara.history: list_deploy_releases.
-- liara.logs / incident.diagnose: analyze_service_logs with app_name and time window.
-- After tool errors, use failure_recovery_hints and observations (logs, diagnosis) before finish.
-
-For advisory follow-ups ("what now?", "چیکار کنم"), use finish with concrete steps from the last assistant/error text — do not restart a full deploy unless the user asks again."""
-
-    user = json.dumps(
-        {
-            "skill_id": skill_id,
-            "user_goal": user_goal,
-            "conversation_history": (conversation_history or [])[-10:],
-            "allowed_tools": catalog,
-            "observations": observations[-10:],
-            "planner_params": planner_params or {},
-            "failure_recovery_hints": (planner_params or {}).get("failure_recovery_hints") or [],
-        },
-        ensure_ascii=False,
+    planner_body = json.loads(
+        build_react_planner_payload(
+            skill_id=skill_id,
+            user_goal=user_goal,
+            conversation_history=conversation_history,
+            observations=observations,
+            planner_params=planner_params,
+        )
     )
-    data = await _llm_json(system, user)
+    planner_body["allowed_tools"] = catalog
+    user = json.dumps(planner_body, ensure_ascii=False)
+    data = await _llm_json(REACT_PLANNER_SYSTEM, user)
     action = data.get("action", "call_tool")
     if action not in ("call_tool", "finish", "clarify"):
         action = "call_tool"
@@ -96,33 +74,29 @@ For advisory follow-ups ("what now?", "چیکار کنم"), use finish with conc
     }
 
 
-_REPLY_SYSTEM = """You are the Liara DevOps agent on Liara cloud.
-Answer the user's goal using ONLY the tool observations provided — never invent balances, counts, or API results.
-Write in the same language as the user (Persian or English). If the user wrote in Persian, the entire answer including any numbered conclusion must be Persian — no English appendix.
-Use clear prose; **bold** for key values is OK.
-If the goal was diagnosis (slow site, errors), end with Persian sections when user is Persian: علت‌های محتمل، اقدام پیشنهادی، نیاز به تأیید.
-If observations show errors, explain what failed and what to try next.
-Liara env vars are managed via liara.get_app_settings and liara.update_env_variables — never claim those tools are missing."""
-
-
 async def stream_user_reply(
     executor: Any,
     run: Run,
     ctx: dict[str, Any],
     user_goal: str,
     observations: list[dict[str, Any]],
+    *,
+    latest_user_message: str | None = None,
 ) -> str:
-    user = json.dumps(
-        {"user_goal": user_goal, "observations": observations[-8:]},
-        ensure_ascii=False,
+    user = build_reply_payload(
+        user_goal=user_goal,
+        latest_user_message=latest_user_message or run.user_message,
+        conversation_history=ctx.get("conversation_history"),
+        observations=observations,
     )
     return await executor._agent_chat_stream(
         run,
         ctx,
-        system=_REPLY_SYSTEM,
+        system=REPLY_SYSTEM,
         user=user,
         temperature=0.25,
-        new_block=True,
+        new_block=False,
+        replace=True,
     )
 
 
@@ -144,9 +118,10 @@ Rules:
 - replan=false when satisfied=false and stopping is appropriate.
 - For logs: LOGS_EMPTY → satisfied=false, replan=true.
 - For deploy/publish goals: satisfied=false if clone, create_app, or deploy_service failed (CLONE_FAILED, CREATE_APP_FAILED, DEPLOY_FAILED) unless the user only asked why it failed.
-- satisfied=true for deploy only after a successful deploy or verify_app_health with HTTP 2xx/3xx."""
+- satisfied=true for deploy only after a successful deploy or verify_app_health with HTTP 2xx/3xx.
+- For liara.health / status questions: satisfied=true once verify_app_health or diagnose_deploy_health explains HTTP status and next steps — even if the site is down (502/503)."""
 
-    user = json.dumps({"user_goal": user_goal, "observations": observations[-8:]}, ensure_ascii=False)
+    user = build_judge_payload(user_goal, observations)
     data = await _llm_json(system, user)
     return {
         "satisfied": bool(data.get("satisfied")),
@@ -342,7 +317,9 @@ async def evaluate_goal(
     *,
     skill_id: str | None = None,
 ) -> dict[str, Any]:
-    user_message = await stream_user_reply(executor, run, ctx, user_goal, observations)
+    user_message = await stream_user_reply(
+        executor, run, ctx, user_goal, observations, latest_user_message=run.user_message
+    )
     verdict = await judge_goal(user_goal, observations)
     if skill_id == "liara.deploy" and not _deploy_pipeline_complete(observations):
         verdict["satisfied"] = False
@@ -378,25 +355,11 @@ async def run_react_agent(executor: Any, run_id: str, max_iterations: int = 6) -
     if run.skill_id == "agent.chat" or ctx.get("chat_only"):
         await stream_bus.publish(run_id, "agent_thinking", {"text": ""})
         try:
-            history = ctx.get("conversation_history") or []
-            chat_user = json.dumps(
-                {
-                    "latest_user_message": run.user_message,
-                    "conversation_history": history[-12:],
-                },
-                ensure_ascii=False,
-            )
-            system = (
-                "You are a Liara DevOps assistant. Reply in the user's language (Persian or English).\n"
-                "Use the conversation history — especially the last assistant message about errors or deploy.\n"
-                "If they ask what to do after a failed deploy, give concrete steps (upgrade @liara/cli, retry deploy, "
-                "check logs, fix app listen on PORT/0.0.0.0). Do not invent API results or claim you ran tools now.\n"
-                "If they only greet, reply briefly and offer help. Keep answers clear and actionable (short bullets OK)."
-            )
+            chat_user = build_chat_payload(run.user_message, ctx.get("conversation_history"))
             text = await executor._agent_chat_stream(
                 run,
                 ctx,
-                system=system,
+                system=CHAT_ONLY_SYSTEM,
                 user=chat_user,
                 temperature=0.35,
                 new_block=False,
@@ -417,15 +380,9 @@ async def run_react_agent(executor: Any, run_id: str, max_iterations: int = 6) -
     if run.skill_id == "agent.summarize" or ctx.get("summarize_only"):
         await stream_bus.publish(run_id, "agent_thinking", {"text": "Summarizing our conversation…"})
         try:
-            user = json.dumps(
-                {
-                    "user_goal": goal,
-                    "conversation_history": (ctx.get("conversation_history") or [])[-12:],
-                },
-                ensure_ascii=False,
-            )
+            user = build_chat_payload(goal, ctx.get("conversation_history"))
             system = """You are the Liara DevOps agent. The user wants a conclusion or recap.
-Use ONLY facts from the conversation history — do not invent metrics.
+Use ONLY facts from conversation_history — do not invent metrics.
 Write in the user's language (Persian or English). Brief, friendly summary."""
             text = await executor._agent_chat_stream(
                 run,
@@ -460,8 +417,7 @@ Write in the user's language (Persian or English). Brief, friendly summary."""
 
     intro = (ctx.get("planner_intro") or "").strip()
     if intro:
-        await executor._agent_chat(run, ctx, intro, append=False)
-        await stream_bus.publish(run_id, "agent_message", {"text": intro, "append": False})
+        await stream_bus.publish(run_id, "agent_thinking", {"text": intro})
 
     final_message = ""
     try:
@@ -542,14 +498,16 @@ Write in the user's language (Persian or English). Brief, friendly summary."""
 
             if action["action"] == "finish":
                 if observations:
-                    final_message = await stream_user_reply(executor, run, ctx, goal, observations)
+                    final_message = await stream_user_reply(
+                        executor, run, ctx, goal, observations, latest_user_message=run.user_message
+                    )
                 else:
                     final_message = await executor._agent_chat_stream(
                         run,
                         ctx,
-                        system=_REPLY_SYSTEM,
+                        system=REPLY_SYSTEM,
                         user=json.dumps({"user_goal": goal}, ensure_ascii=False),
-                        new_block=True,
+                        replace=True,
                     )
                 if not final_message:
                     final_message = action.get("message") or "Done."
@@ -743,7 +701,12 @@ Write in the user's language (Persian or English). Brief, friendly summary."""
                 final_message = recovery_verdict.get("user_message") or ""
                 if not final_message.strip() and observations:
                     final_message = await stream_user_reply(
-                        executor, run, ctx, goal, observations
+                        executor,
+                        run,
+                        ctx,
+                        goal,
+                        observations,
+                        latest_user_message=run.user_message,
                     )
                 run.state = RunState.succeeded
                 run.result_summary = final_message or "Done."

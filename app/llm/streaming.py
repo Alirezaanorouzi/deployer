@@ -15,6 +15,7 @@ async def stream_chat_to_run(
     *,
     temperature: float | None = None,
     new_block: bool = False,
+    replace: bool = False,
 ) -> str:
     """Stream assistant tokens; publish agent_message SSE events with stream=true."""
     client = get_llm_client()
@@ -46,6 +47,7 @@ async def stream_chat_to_run(
                 "stream": True,
                 "stream_start": first,
                 "new_block": bool(new_block and first),
+                "replace": bool(replace and first),
             },
         )
         first = False
