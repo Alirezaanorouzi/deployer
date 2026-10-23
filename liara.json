@@ -9,8 +9,7 @@
   "disks": [
     {
       "name": "data",
-      "mountTo": "data",
-      "size": 5
+      "mountTo": "data"
     }
   ]
 }
