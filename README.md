@@ -10,6 +10,8 @@ python -m venv .venv
 copy .env.example .env
 ```
 
+Use **`requirements-dev.txt` locally** (PyPI). Liara uses **`requirements.txt`**, which installs from the committed **`wheels/`** folder (Linux wheels) so builds do not wait on Liara’s PyPI mirror.
+
 Configure `.env` (never commit it). For **Liara AI** (`LLM_BASE_URL` like `https://ai.liara.ir/api/.../v1`), set `LLM_MODEL` to an id from your Liara AI dashboard (e.g. `openai/gpt-5.6-luna`). Restart uvicorn after changing `LLM_API_KEY` or model.
 
 Run:
@@ -30,7 +32,7 @@ Optional: [docs/cursor-sdk.md](docs/cursor-sdk.md) — `CURSOR_API_KEY`, default
 
 `liara.json` uses `python main.py` on port **8000** and a **`data`** disk for SQLite. Set **`WORKSPACE_API_KEY`**, **`LIARA_API_TOKEN`**, and LLM/GitHub keys in the Liara app env.
 
-**Build pauses at `pip` / SQLAlchemy?** That runs on Liara’s build VM, not your machine. The first deploy often waits **3–10 minutes** on `Collecting sqlalchemy` while large wheels download from Liara’s PyPI mirror — it is usually not frozen. `requirements.txt` uses pinned versions (no `uvicorn[standard]`) to speed installs. The deployer terminal shows a heartbeat every ~40s during long pip steps.
+**Faster Liara pip:** `wheels/` holds pre-downloaded Linux packages (~8 MB). Production `requirements.txt` uses `--no-index --find-links=./wheels`. After changing pins in `requirements-base.txt`, run `python scripts/refresh_liara_wheels.py` and commit the updated wheels before deploy.
 
 ## Publish to GitHub
 

@@ -1,10 +1,6 @@
-# Pinned for fast Liara builds (loose >= caused long pip resolver stalls on the platform mirror).
-# No uvicorn[standard] — production does not need watchfiles/reload extras.
-fastapi==0.161.1
-uvicorn==0.54.0
-sqlalchemy==2.0.36
-pydantic==2.10.6
-pydantic-settings==2.7.1
-httpx==0.28.1
-python-multipart==0.0.20
-openai==1.60.0
+# Liara production: install ONLY from vendored Linux wheels (no PyPI / platform mirror).
+# Refresh with:  .venv\Scripts\python scripts/refresh_liara_wheels.py
+# Local Windows/dev: use requirements-dev.txt (not this file).
+--no-index
+--find-links=./wheels
+-r requirements-base.txt

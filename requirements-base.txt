@@ -1,0 +1,9 @@
+# Shared pins (local + Liara). Edit versions here, then refresh wheels/.
+fastapi==0.161.1
+uvicorn==0.54.0
+sqlalchemy==2.0.36
+pydantic==2.10.6
+pydantic-settings==2.7.1
+httpx==0.28.1
+python-multipart==0.0.20
+openai==1.60.0
