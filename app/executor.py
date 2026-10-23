@@ -44,8 +44,13 @@ class RunExecutor:
         self.liara = LiaraAdapter(run_id=run_id)
 
     async def _log(self, line: str) -> None:
-        if self._run_id:
-            await stream_bus.log(self._run_id, line)
+        if not self._run_id:
+            return
+        safe = line.encode("utf-8", errors="replace").decode("utf-8")
+        try:
+            await stream_bus.log(self._run_id, safe)
+        except Exception:
+            pass
 
     async def _agent_chat(
         self,
@@ -106,15 +111,26 @@ class RunExecutor:
         liara_projects: list[str] | None = None,
         conversation_history: list[dict[str, str]] | None = None,
     ) -> Run:
-        decision = await plan_with_agent(
-            message,
-            app=app,
-            target_env=target_env,
-            health_url=health_url,
-            github_repos=github_repos,
-            liara_projects=liara_projects,
-            conversation_history=conversation_history,
-        )
+        from app.agent.orchestrator import is_chat_only
+
+        if is_chat_only(message):
+            decision = AgentDecision(
+                skill_id="agent.chat",
+                summary_en="Chat reply, no tools",
+                summary_fa="پاسخ گفتگو بدون ابزار",
+                params={},
+                assistant_message="",
+            )
+        else:
+            decision = await plan_with_agent(
+                message,
+                app=app,
+                target_env=target_env,
+                health_url=health_url,
+                github_repos=github_repos,
+                liara_projects=liara_projects,
+                conversation_history=conversation_history,
+            )
 
         if decision.is_pipeline:
             repo = decision.params.get("repo") or decision.params.get("github_repo")
@@ -149,10 +165,18 @@ class RunExecutor:
                 message,
                 decision,
                 conversation_history=conversation_history,
+                github_repos=github_repos,
+                liara_projects=liara_projects,
+                default_app=app,
             )
             if decision.skill_id == "agent.summarize":
                 ctx = self._ctx(run)
                 ctx["summarize_only"] = True
+                self._save_ctx(run, ctx)
+            if decision.skill_id == "agent.chat":
+                ctx = self._ctx(run)
+                ctx["chat_only"] = True
+                ctx["planner_intro"] = ""
                 self._save_ctx(run, ctx)
             return run
 
@@ -189,7 +213,22 @@ class RunExecutor:
         decision: AgentDecision,
         *,
         conversation_history: list[dict[str, str]] | None = None,
+        github_repos: list[str] | None = None,
+        liara_projects: list[str] | None = None,
+        default_app: str | None = None,
     ) -> Run:
+        from app.agent.conversation_params import compose_user_goal, enrich_planner_params
+
+        planner_params = dict(decision.params or {})
+        user_goal = compose_user_goal(message, conversation_history)
+        enrich_planner_params(
+            decision.skill_id,
+            message,
+            planner_params,
+            conversation_history=conversation_history,
+            github_repos=github_repos,
+            default_app=default_app,
+        )
         run = Run(
             user_message=message,
             state=RunState.executing,
@@ -204,15 +243,19 @@ class RunExecutor:
         ctx = {
             "react_mode": True,
             "agent_loop": True,
-            "user_goal": message,
+            "user_goal": user_goal,
             "agent_message": "",
             "planner_intro": decision.assistant_message,
             "agent_transcript": [],
             "observations": [],
             "suggested_tools": tools_for_skill(decision.skill_id),
-            "planner_params": decision.params or {},
+            "planner_params": planner_params,
             "conversation_history": conversation_history or [],
+            "github_repos": github_repos or [],
+            "liara_projects": liara_projects or [],
         }
+        if default_app:
+            ctx["active_app"] = default_app.strip()
         run.context_json = json.dumps(ctx)
         self.db.commit()
         return run
@@ -425,6 +468,7 @@ class RunExecutor:
                 run.state = RunState.verifying
                 self.db.commit()
                 if plan.skill_id == "incident.diagnose":
+                    evidence["user_goal"] = ctx.get("user_goal", run.user_message)
                     run.result_summary = await diagnose_with_llm(evidence)
                 elif plan.domain_playbook:
                     run.result_summary = plan.summary_fa + "\n\nDomain:\n" + "\n".join(

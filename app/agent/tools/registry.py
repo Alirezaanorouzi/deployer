@@ -526,7 +526,219 @@ TOOLS: dict[str, ToolSpec] = {
         },
         risk="medium",
     ),
+    "guide.recommend_setup": ToolSpec(
+        id="guide.recommend_setup",
+        name="Recommend deployment method and Liara plan",
+        description=(
+            "Read-only setup guide: deployment path (GitHub agent vs CLI), suggested platform/port, "
+            "starter plan_id from list_available_plans, disk/DB hints, and manual checklist. "
+            "Use after list_available_plans and optional repo.prepare_deploy_workspace."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "user_goal": {"type": "string"},
+                "repo": {"type": "string"},
+                "platform": {"type": "string"},
+                "stack": {"type": "string"},
+                "port": {"type": "integer"},
+                "plans": {"type": "array", "items": {"type": "object"}},
+                "analysis": {"type": "object"},
+            },
+            "additionalProperties": True,
+        },
+        risk="low",
+    ),
+    "guide.domain_connect_playbook": ToolSpec(
+        id="guide.domain_connect_playbook",
+        name="Domain + IRNIC / registrar playbook",
+        description=(
+            "Read-only steps for connecting a custom domain: user tasks at IRNIC/registrar, "
+            "agent capabilities (list domains, check status, add after approval). No API writes."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "user_goal": {"type": "string"},
+                "app_name": {"type": "string"},
+                "domain_name": {"type": "string"},
+                "default_url": {"type": "string"},
+                "domains": {"type": "array", "items": {"type": "object"}},
+                "defer_attach": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+        risk="low",
+    ),
+    "liara.check_domain_status": ToolSpec(
+        id="liara.check_domain_status",
+        name="Check domain DNS/SSL status",
+        description=(
+            "Liara API GET /v1/domains/{id}/check — verification and certificate status. "
+            "Pass domain_id or domain_name (must exist on the account)."
+        ),
+        parameters_schema=_project_params(
+            domain_id={"type": "string"},
+            domain_name={"type": "string"},
+        ),
+        risk="low",
+    ),
+    "liara.delete_app": ToolSpec(
+        id="liara.delete_app",
+        name="Delete Liara app",
+        description="DELETE /v1/projects/{name} — permanently removes the app. Requires confirm_write.",
+        parameters_schema=_write_params(),
+        risk="high",
+    ),
+    "liara.deploy_release": ToolSpec(
+        id="liara.deploy_release",
+        name="Deploy an existing release/source",
+        description=(
+            "POST /v2/projects/{name}/releases — redeploy a previous sourceID from release history. "
+            "Use list_deploy_releases first. Requires confirm_write."
+        ),
+        parameters_schema=_write_params(
+            source_id={"type": "string", "description": "Release source ID from history"},
+            port={"type": "integer", "description": "Listen port if required"},
+            platform_type={"type": "string", "description": "Platform type if required"},
+        ),
+        risk="high",
+    ),
+    "liara.delete_app_domain": ToolSpec(
+        id="liara.delete_app_domain",
+        name="Delete custom domain",
+        description="DELETE /v1/domains/{id}. Requires confirm_write.",
+        parameters_schema=_write_params(
+            domain_id={"type": "string"},
+            domain_name={"type": "string"},
+        ),
+        risk="high",
+    ),
+    "liara.enable_domain_ssl": ToolSpec(
+        id="liara.enable_domain_ssl",
+        name="Provision SSL certificate",
+        description="POST /v1/domains/provision-ssl-certs for domain FQDN. Requires confirm_write.",
+        parameters_schema=_write_params(
+            domain_name={"type": "string", "description": "FQDN, e.g. shop.example.com"},
+        ),
+        risk="medium",
+    ),
+    "liara.disable_domain_ssl": ToolSpec(
+        id="liara.disable_domain_ssl",
+        name="Disable domain SSL",
+        description="POST /v1/domains/{id}/ssl/disable. Requires confirm_write.",
+        parameters_schema=_write_params(
+            domain_id={"type": "string"},
+            domain_name={"type": "string"},
+        ),
+        risk="medium",
+    ),
+    "liara.delete_app_disk": ToolSpec(
+        id="liara.delete_app_disk",
+        name="Delete persistent disk",
+        description="DELETE /v1/projects/{id}/disks/{name}. Requires confirm_write.",
+        parameters_schema=_write_params(
+            disk_name={"type": "string"},
+        ),
+        risk="high",
+    ),
+    "liara.resize_app_disk": ToolSpec(
+        id="liara.resize_app_disk",
+        name="Resize persistent disk",
+        description="POST .../disks/{name}/resize. Requires confirm_write.",
+        parameters_schema=_write_params(
+            disk_name={"type": "string"},
+            size_gb={"type": "integer"},
+            size={"type": "integer", "description": "Alias for size_gb"},
+        ),
+        risk="high",
+    ),
+    "liara.create_disk_backup": ToolSpec(
+        id="liara.create_disk_backup",
+        name="Create disk backup",
+        description="POST .../disks/{name}/backups. Requires confirm_write.",
+        parameters_schema=_write_params(
+            disk_name={"type": "string"},
+        ),
+        risk="medium",
+    ),
+    "liara.create_disk_ftp": ToolSpec(
+        id="liara.create_disk_ftp",
+        name="Create disk FTP access",
+        description="POST .../disks/{dname}/ftp. Requires confirm_write.",
+        parameters_schema=_write_params(
+            disk_name={"type": "string"},
+            ftp_username={"type": "string"},
+            read_only={"type": "boolean", "description": "FTP read-only flag"},
+        ),
+        risk="medium",
+    ),
+    "liara.delete_disk_ftp": ToolSpec(
+        id="liara.delete_disk_ftp",
+        name="Delete disk FTP account",
+        description="DELETE /v1/ftp/{fname}. Requires confirm_write.",
+        parameters_schema=_write_params(
+            ftp_name={"type": "string", "description": "FTP account name to delete"},
+        ),
+        risk="medium",
+    ),
+    "liara.set_read_only_filesystem": ToolSpec(
+        id="liara.set_read_only_filesystem",
+        name="Toggle read-only app filesystem",
+        description="POST /v1/projects/{id}/read-only/enable|disable. Requires confirm_write.",
+        parameters_schema=_write_params(
+            enabled={"type": "boolean", "description": "true=enable read-only root"},
+        ),
+        risk="high",
+    ),
+    "liara.set_default_subdomain": ToolSpec(
+        id="liara.set_default_subdomain",
+        name="Toggle default liara.run subdomain",
+        description="POST /v1/projects/{id}/default-subdomain/enable|disable. Requires confirm_write.",
+        parameters_schema=_write_params(
+            enabled={"type": "boolean"},
+        ),
+        risk="medium",
+    ),
+    "liara.set_fixed_ip": ToolSpec(
+        id="liara.set_fixed_ip",
+        name="Toggle static/fixed IP",
+        description="POST /v1/projects/{id}/fixed-ip/enable|disable. Requires confirm_write.",
+        parameters_schema=_write_params(
+            enabled={"type": "boolean"},
+        ),
+        risk="high",
+    ),
 }
+
+PAAS_WRITE_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "liara.restart_service",
+        "liara.scale_service",
+        "liara.change_service_plan",
+        "liara.update_env_variables",
+        "liara.set_zero_downtime",
+        "liara.create_app_domain",
+        "liara.set_domain_redirect",
+        "liara.create_app_disk",
+        "liara.deploy_service",
+        "liara.ensure_private_network",
+        "liara.create_app",
+        "liara.delete_app",
+        "liara.deploy_release",
+        "liara.delete_app_domain",
+        "liara.enable_domain_ssl",
+        "liara.disable_domain_ssl",
+        "liara.delete_app_disk",
+        "liara.resize_app_disk",
+        "liara.create_disk_backup",
+        "liara.create_disk_ftp",
+        "liara.delete_disk_ftp",
+        "liara.set_read_only_filesystem",
+        "liara.set_default_subdomain",
+        "liara.set_fixed_ip",
+    }
+)
 
 
 async def _run_get_account_balance(liara: LiaraAdapter, _params: dict[str, Any]) -> ToolResult:
@@ -606,6 +818,189 @@ async def _run_list_deploy_releases(liara: LiaraAdapter, params: dict[str, Any])
     if not r.ok:
         return ToolResult(False, r.code, r.message, r.data)
     return ToolResult(True, "OK", r.message, r.data)
+
+
+async def _run_guide_recommend_setup(_liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    from app.agent.setup_guide import build_setup_recommendation
+
+    text, data = build_setup_recommendation(params)
+    return ToolResult(True, "OK", text, data)
+
+
+async def _run_guide_domain_connect_playbook(_liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    from app.agent.setup_guide import build_domain_connect_playbook
+
+    text, data = build_domain_connect_playbook(params)
+    return ToolResult(True, "OK", text, data)
+
+
+async def _run_check_domain_status(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    r = await liara.check_domain_status(
+        domain_id=params.get("domain_id"),
+        domain_name=params.get("domain_name"),
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+    )
+    if not r.ok:
+        return ToolResult(False, r.code, r.message, r.data)
+    return ToolResult(True, "OK", r.message, r.data)
+
+
+async def _run_delete_app(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    r = await liara.delete_app(
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_deploy_release(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    r = await liara.deploy_release(
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+        source_id=params.get("source_id") or "",
+        port=params.get("port"),
+        platform_type=params.get("platform_type"),
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_delete_app_domain(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    r = await liara.delete_app_domain(
+        domain_id=params.get("domain_id"),
+        domain_name=params.get("domain_name"),
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_enable_domain_ssl(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    r = await liara.enable_domain_ssl(domain_name=params.get("domain_name") or "")
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_disable_domain_ssl(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    r = await liara.disable_domain_ssl(
+        domain_id=params.get("domain_id"),
+        domain_name=params.get("domain_name"),
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_delete_app_disk(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    r = await liara.delete_app_disk(
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+        disk_name=params.get("disk_name") or "",
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_resize_app_disk(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    size = params.get("size_gb") or params.get("size")
+    r = await liara.resize_app_disk(
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+        disk_name=params.get("disk_name") or "",
+        size_gb=size if size is not None else "",
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_create_disk_backup(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    r = await liara.create_disk_backup(
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+        disk_name=params.get("disk_name") or "",
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_create_disk_ftp(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    r = await liara.create_disk_ftp(
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+        disk_name=params.get("disk_name") or "",
+        ftp_username=params.get("ftp_username") or "",
+        read_only=bool(params.get("read_only")),
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_delete_disk_ftp(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    r = await liara.delete_disk_ftp(ftp_name=params.get("ftp_name") or "")
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_set_read_only_filesystem(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    if params.get("enabled") is None:
+        return ToolResult(False, "INVALID_INPUT", "enabled (true/false) is required", None)
+    r = await liara.set_read_only_filesystem(
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+        enabled=bool(params["enabled"]),
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_set_default_subdomain(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    if params.get("enabled") is None:
+        return ToolResult(False, "INVALID_INPUT", "enabled (true/false) is required", None)
+    r = await liara.set_default_subdomain(
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+        enabled=bool(params["enabled"]),
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
+
+
+async def _run_set_fixed_ip(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
+    blocked = _require_confirm(params)
+    if blocked:
+        return ToolResult(False, blocked.code, blocked.text_for_agent, None)
+    if params.get("enabled") is None:
+        return ToolResult(False, "INVALID_INPUT", "enabled (true/false) is required", None)
+    r = await liara.set_fixed_ip(
+        project_id=params.get("project_id"),
+        app_name=params.get("app_name") or params.get("app"),
+        enabled=bool(params["enabled"]),
+    )
+    return ToolResult(r.ok, r.code, r.message, r.data)
 
 
 async def _run_list_app_domains(liara: LiaraAdapter, params: dict[str, Any]) -> ToolResult:
@@ -1104,6 +1499,7 @@ async def _run_analyze_service_logs(liara: LiaraAdapter, params: dict[str, Any])
         lines=line_count,
         focus=params.get("focus"),
         time_range=time_range_from_params(params),
+        user_goal=params.get("user_goal"),
     )
     if not r.ok:
         return ToolResult(False, r.code, r.message, r.data)
@@ -1140,6 +1536,22 @@ _HANDLERS: dict[str, ToolHandler] = {
     "liara.diagnose_deploy_health": _run_diagnose_deploy_health,
     "repo.clone_github": _run_clone_github,
     "repo.prepare_deploy_workspace": _run_prepare_deploy_workspace,
+    "guide.recommend_setup": _run_guide_recommend_setup,
+    "guide.domain_connect_playbook": _run_guide_domain_connect_playbook,
+    "liara.check_domain_status": _run_check_domain_status,
+    "liara.delete_app": _run_delete_app,
+    "liara.deploy_release": _run_deploy_release,
+    "liara.delete_app_domain": _run_delete_app_domain,
+    "liara.enable_domain_ssl": _run_enable_domain_ssl,
+    "liara.disable_domain_ssl": _run_disable_domain_ssl,
+    "liara.delete_app_disk": _run_delete_app_disk,
+    "liara.resize_app_disk": _run_resize_app_disk,
+    "liara.create_disk_backup": _run_create_disk_backup,
+    "liara.create_disk_ftp": _run_create_disk_ftp,
+    "liara.delete_disk_ftp": _run_delete_disk_ftp,
+    "liara.set_read_only_filesystem": _run_set_read_only_filesystem,
+    "liara.set_default_subdomain": _run_set_default_subdomain,
+    "liara.set_fixed_ip": _run_set_fixed_ip,
 }
 
 
@@ -1172,18 +1584,45 @@ _SKILL_TOOL_HINTS: dict[str, list[str]] = {
     "liara.usage": ["liara.get_service_resource_usage"],
     "liara.logs": ["liara.analyze_service_logs"],
     "liara.events": ["liara.list_app_events"],
-    "liara.history": ["liara.list_deploy_releases", "liara.deploy_service"],
+    "liara.history": ["liara.list_deploy_releases", "liara.deploy_service", "liara.deploy_release"],
     "liara.domains": [
         "liara.list_app_domains",
+        "liara.check_domain_status",
+        "guide.domain_connect_playbook",
         "liara.create_app_domain",
         "liara.set_domain_redirect",
+        "liara.enable_domain_ssl",
+        "liara.disable_domain_ssl",
+        "liara.delete_app_domain",
     ],
-    "liara.disks": ["liara.list_app_disks", "liara.create_app_disk"],
+    "liara.bootstrap": [
+        "liara.list_apps",
+        "repo.clone_github",
+        "repo.prepare_deploy_workspace",
+        "liara.list_available_plans",
+        "liara.get_service_plan_info",
+        "guide.recommend_setup",
+        "guide.domain_connect_playbook",
+        "liara.list_app_domains",
+        "liara.check_domain_status",
+    ],
+    "liara.disks": [
+        "liara.list_app_disks",
+        "liara.create_app_disk",
+        "liara.delete_app_disk",
+        "liara.resize_app_disk",
+        "liara.create_disk_backup",
+        "liara.create_disk_ftp",
+        "liara.delete_disk_ftp",
+    ],
     "liara.settings": [
         "liara.get_app_settings",
         "liara.update_env_variables",
         "liara.set_zero_downtime",
         "liara.restart_service",
+        "liara.set_read_only_filesystem",
+        "liara.set_default_subdomain",
+        "liara.set_fixed_ip",
     ],
     "liara.resize": [
         "liara.get_service_plan_info",
@@ -1195,6 +1634,7 @@ _SKILL_TOOL_HINTS: dict[str, list[str]] = {
         "liara.list_networks",
         "liara.ensure_private_network",
         "liara.list_apps",
+        "liara.delete_app",
         "liara.bind_app",
         "repo.clone_github",
         "repo.prepare_deploy_workspace",

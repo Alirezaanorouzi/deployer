@@ -98,6 +98,61 @@ class LiaraAdapter:
                 params=params,
             )
 
+    async def _delete(
+        self,
+        path: str,
+        *,
+        team_scope: bool = True,
+    ) -> httpx.Response:
+        params = self._team_query(enabled=team_scope)
+        async with httpx.AsyncClient(timeout=90) as client:
+            return await client.delete(
+                f"{self._base}{path}",
+                headers=self._headers(),
+                params=params,
+            )
+
+    async def _post_empty(
+        self,
+        path: str,
+        *,
+        team_scope: bool = True,
+    ) -> httpx.Response:
+        headers = {**self._headers(), "Content-Type": "application/json"}
+        params = self._team_query(enabled=team_scope)
+        async with httpx.AsyncClient(timeout=90) as client:
+            return await client.post(
+                f"{self._base}{path}",
+                headers=headers,
+                json={},
+                params=params,
+            )
+
+    @staticmethod
+    def _toggle_path(enabled: bool) -> str:
+        return "enable" if enabled else "disable"
+
+    async def resolve_domain_id(
+        self,
+        *,
+        domain_id: str | None = None,
+        domain_name: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        dom_id = (domain_id or "").strip()
+        name = (domain_name or "").strip().lower()
+        if dom_id:
+            return dom_id, name or None
+        if not name:
+            return None, None
+        listed = await self._get("/v1/domains")
+        if listed.status_code >= 400:
+            return None, name
+        body = listed.json() if listed.content else {}
+        for d in body.get("domains") or []:
+            if isinstance(d, dict) and str(d.get("name") or "").lower() == name:
+                return str(d.get("_id") or d.get("id") or ""), name
+        return None, name
+
     def _pick_credit_toman(self, body: dict[str, Any]) -> int | float | None:
         user = body.get("user")
         if isinstance(user, dict):
@@ -611,6 +666,7 @@ class LiaraAdapter:
         lines: int = 120,
         focus: str | None = None,
         time_range: dict[str, Any] | None = None,
+        user_goal: str | None = None,
     ) -> AdapterResult:
         got = await self.get_service_logs(
             project_id=project_id,
@@ -629,6 +685,7 @@ class LiaraAdapter:
             project_id=str(pid),
             logs=data.get("logs", ""),
             user_focus=f"{focus_text} (time window: {window})",
+            user_goal=user_goal,
         )
         preview_lines = min(8, data.get("line_count", 8))
         log_preview = "\n".join((data.get("logs") or "").splitlines()[-preview_lines:])
@@ -860,6 +917,68 @@ class LiaraAdapter:
                 "OK",
                 text,
                 {"project_id": resolved, "domains": domains, "total": len(domains)},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def check_domain_status(
+        self,
+        *,
+        domain_id: str | None = None,
+        domain_name: str | None = None,
+        project_id: str | None = None,
+        app_name: str | None = None,
+    ) -> AdapterResult:
+        """GET /v1/domains/{id}/check — DNS/SSL verification status."""
+        dom_id = (domain_id or "").strip()
+        name = (domain_name or "").strip().lower()
+        if not dom_id and name:
+            listed = await self.list_app_domains(project_id=project_id, app_name=app_name)
+            if not listed.ok:
+                return listed
+            for d in (listed.data or {}).get("domains") or []:
+                if isinstance(d, dict) and str(d.get("name") or "").lower() == name:
+                    dom_id = str(d.get("id") or d.get("_id") or "")
+                    break
+            if not dom_id:
+                all_dom = await self._get("/v1/domains")
+                if all_dom.status_code == 200:
+                    body = all_dom.json() if all_dom.content else {}
+                    for d in body.get("domains") or []:
+                        if isinstance(d, dict) and str(d.get("name") or "").lower() == name:
+                            dom_id = str(d.get("_id") or d.get("id") or "")
+                            break
+        if not dom_id:
+            return AdapterResult(
+                False,
+                "DOMAIN_REQUIRED",
+                "Provide domain_id or domain_name (must already exist on Liara).",
+            )
+        try:
+            r = await self._get(f"/v1/domains/{dom_id}/check")
+            if r.status_code == 404:
+                return AdapterResult(False, "NOT_FOUND", "Domain not found on Liara.")
+            if r.status_code >= 400:
+                return AdapterResult(False, "API_ERROR", f"Domain check returned {r.status_code}")
+            body = r.json() if r.content else {}
+            dom = body.get("domain") if isinstance(body, dict) else body
+            if not isinstance(dom, dict):
+                dom = {}
+            status = dom.get("status") or "unknown"
+            cert = dom.get("certificatesStatus") or dom.get("certificates_status")
+            cname = dom.get("CNameRecord")
+            lines = [
+                f"Domain **{dom.get('name') or name}**",
+                f"- status: **{status}**",
+                f"- certificates: **{cert or 'n/a'}**",
+            ]
+            if cname:
+                lines.append(f"- CNAME hint: `{cname}`")
+            return AdapterResult(
+                True,
+                "OK",
+                "\n".join(lines),
+                {"domain": dom, "domain_id": dom_id},
             )
         except httpx.HTTPError as e:
             return AdapterResult(False, "NETWORK_ERROR", str(e))
@@ -1218,3 +1337,357 @@ class LiaraAdapter:
         if fail:
             return fail
         return await self.deploy(resolved, path=path, port=port, on_line=on_line)
+
+    async def delete_app(
+        self,
+        *,
+        project_id: str | None = None,
+        app_name: str | None = None,
+    ) -> AdapterResult:
+        resolved, fail = await self._require_project(project_id=project_id, app_name=app_name)
+        if fail:
+            return fail
+        try:
+            r = await self._delete(f"/v1/projects/{resolved}")
+            if r.status_code in (200, 204):
+                return AdapterResult(True, "OK", f"App **{resolved}** deleted.", {"project_id": resolved})
+            if r.status_code == 404:
+                return AdapterResult(False, "NOT_FOUND", f"App {resolved} not found")
+            return AdapterResult(False, "API_ERROR", f"Delete app failed ({r.status_code})")
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def deploy_release(
+        self,
+        *,
+        project_id: str | None = None,
+        app_name: str | None = None,
+        source_id: str,
+        port: int | None = None,
+        platform_type: str | None = None,
+    ) -> AdapterResult:
+        resolved, fail = await self._require_project(project_id=project_id, app_name=app_name)
+        if fail:
+            return fail
+        source_id = (source_id or "").strip()
+        if not source_id:
+            return AdapterResult(False, "INVALID_INPUT", "source_id (release/source ID) is required")
+        body: dict[str, Any] = {"sourceID": source_id}
+        if port is not None:
+            body["port"] = int(port)
+        if platform_type:
+            body["type"] = platform_type.strip()
+        try:
+            r = await self._post_json(f"/v2/projects/{resolved}/releases", body)
+            if r.status_code >= 400:
+                return AdapterResult(
+                    False,
+                    "API_ERROR",
+                    liara_error_message(r.text or "", r.status_code),
+                )
+            payload = r.json() if r.content else {}
+            release_id = payload.get("releaseID") if isinstance(payload, dict) else None
+            return AdapterResult(
+                True,
+                "OK",
+                f"Release deploy submitted for **{resolved}**"
+                + (f" (releaseID `{release_id}`)." if release_id else "."),
+                {"project_id": resolved, "release_id": release_id, "source_id": source_id},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def delete_app_domain(
+        self,
+        *,
+        domain_id: str | None = None,
+        domain_name: str | None = None,
+    ) -> AdapterResult:
+        dom_id, name = await self.resolve_domain_id(domain_id=domain_id, domain_name=domain_name)
+        if not dom_id:
+            return AdapterResult(False, "NOT_FOUND", "domain_id or known domain_name required")
+        try:
+            r = await self._delete(f"/v1/domains/{dom_id}")
+            if r.status_code in (200, 204):
+                label = name or dom_id
+                return AdapterResult(True, "OK", f"Domain **{label}** deleted.", {"domain_id": dom_id})
+            if r.status_code == 404:
+                return AdapterResult(False, "NOT_FOUND", "Domain not found")
+            return AdapterResult(False, "API_ERROR", f"Delete domain failed ({r.status_code})")
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def enable_domain_ssl(self, *, domain_name: str) -> AdapterResult:
+        name = (domain_name or "").strip().lower()
+        if not name:
+            return AdapterResult(False, "INVALID_INPUT", "domain_name is required")
+        try:
+            r = await self._post_json("/v1/domains/provision-ssl-certs", {"domain": name})
+            if r.status_code >= 400:
+                return AdapterResult(False, "API_ERROR", f"Enable SSL failed ({r.status_code})")
+            return AdapterResult(
+                True,
+                "OK",
+                f"SSL provisioning requested for **{name}**. Check domain status after DNS is correct.",
+                {"domain_name": name},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def disable_domain_ssl(
+        self,
+        *,
+        domain_id: str | None = None,
+        domain_name: str | None = None,
+    ) -> AdapterResult:
+        dom_id, name = await self.resolve_domain_id(domain_id=domain_id, domain_name=domain_name)
+        if not dom_id:
+            return AdapterResult(False, "NOT_FOUND", "domain_id or known domain_name required")
+        try:
+            r = await self._post_empty(f"/v1/domains/{dom_id}/ssl/disable")
+            if r.status_code in (200, 204):
+                return AdapterResult(
+                    True,
+                    "OK",
+                    f"SSL disabled for **{name or dom_id}**.",
+                    {"domain_id": dom_id},
+                )
+            return AdapterResult(False, "API_ERROR", f"Disable SSL failed ({r.status_code})")
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def delete_app_disk(
+        self,
+        *,
+        project_id: str | None = None,
+        app_name: str | None = None,
+        disk_name: str,
+    ) -> AdapterResult:
+        resolved, fail = await self._require_project(project_id=project_id, app_name=app_name)
+        if fail:
+            return fail
+        name, name_err = normalize_disk_name(disk_name)
+        if name_err or not name:
+            return AdapterResult(False, "INVALID_DISK_NAME", name_err or "invalid disk name")
+        try:
+            r = await self._delete(f"/v1/projects/{resolved}/disks/{name}")
+            if r.status_code in (200, 204):
+                return AdapterResult(
+                    True,
+                    "OK",
+                    f"Disk **{name}** deleted from **{resolved}**.",
+                    {"project_id": resolved, "disk_name": name},
+                )
+            return AdapterResult(
+                False,
+                "API_ERROR",
+                liara_error_message(r.text or "", r.status_code),
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def resize_app_disk(
+        self,
+        *,
+        project_id: str | None = None,
+        app_name: str | None = None,
+        disk_name: str,
+        size_gb: str | int,
+    ) -> AdapterResult:
+        resolved, fail = await self._require_project(project_id=project_id, app_name=app_name)
+        if fail:
+            return fail
+        name, name_err = normalize_disk_name(disk_name)
+        if name_err or not name:
+            return AdapterResult(False, "INVALID_DISK_NAME", name_err or "invalid disk name")
+        size, size_err = parse_disk_size_gb(size_gb)
+        if size_err or size is None:
+            return AdapterResult(False, "INVALID_INPUT", size_err or "invalid size")
+        try:
+            r = await self._post_json(
+                f"/v1/projects/{resolved}/disks/{name}/resize",
+                {"size": str(size)},
+            )
+            if r.status_code >= 400:
+                return AdapterResult(
+                    False,
+                    "API_ERROR",
+                    liara_error_message(r.text or "", r.status_code),
+                )
+            return AdapterResult(
+                True,
+                "OK",
+                f"Disk **{name}** resize to **{size} GB** submitted for **{resolved}**.",
+                {"project_id": resolved, "disk_name": name, "size_gb": size},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def create_disk_backup(
+        self,
+        *,
+        project_id: str | None = None,
+        app_name: str | None = None,
+        disk_name: str,
+    ) -> AdapterResult:
+        resolved, fail = await self._require_project(project_id=project_id, app_name=app_name)
+        if fail:
+            return fail
+        name, name_err = normalize_disk_name(disk_name)
+        if name_err or not name:
+            return AdapterResult(False, "INVALID_DISK_NAME", name_err or "invalid disk name")
+        try:
+            r = await self._post_empty(f"/v1/projects/{resolved}/disks/{name}/backups")
+            if r.status_code >= 400:
+                return AdapterResult(
+                    False,
+                    "API_ERROR",
+                    liara_error_message(r.text or "", r.status_code),
+                )
+            return AdapterResult(
+                True,
+                "OK",
+                f"Backup job started for disk **{name}** on **{resolved}**.",
+                {"project_id": resolved, "disk_name": name},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def create_disk_ftp(
+        self,
+        *,
+        project_id: str | None = None,
+        app_name: str | None = None,
+        disk_name: str,
+        ftp_username: str,
+        read_only: bool = False,
+    ) -> AdapterResult:
+        resolved, fail = await self._require_project(project_id=project_id, app_name=app_name)
+        if fail:
+            return fail
+        dname, name_err = normalize_disk_name(disk_name)
+        if name_err or not dname:
+            return AdapterResult(False, "INVALID_DISK_NAME", name_err or "invalid disk name")
+        user = (ftp_username or "").strip()
+        if not user:
+            return AdapterResult(False, "INVALID_INPUT", "ftp_username is required")
+        try:
+            r = await self._post_json(
+                f"/v1/projects/{resolved}/disks/{dname}/ftp",
+                {"username": user, "readOnly": bool(read_only)},
+            )
+            if r.status_code >= 400:
+                return AdapterResult(
+                    False,
+                    "API_ERROR",
+                    liara_error_message(r.text or "", r.status_code),
+                )
+            body = r.json() if r.content else {}
+            if not isinstance(body, dict):
+                body = {}
+            safe = {
+                "username": body.get("username"),
+                "host": body.get("host"),
+                "password": "[redacted — see Liara console]" if body.get("password") else None,
+            }
+            return AdapterResult(
+                True,
+                "OK",
+                f"FTP created for disk **{dname}** — user **{safe.get('username')}**, host **{safe.get('host')}**. "
+                "Password was returned by API; retrieve from Liara console if needed.",
+                {"project_id": resolved, "disk_name": dname, "ftp": safe},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def delete_disk_ftp(self, *, ftp_name: str) -> AdapterResult:
+        fname = (ftp_name or "").strip()
+        if not fname:
+            return AdapterResult(False, "INVALID_INPUT", "ftp_name is required")
+        try:
+            r = await self._delete(f"/v1/ftp/{fname}")
+            if r.status_code in (200, 204):
+                return AdapterResult(True, "OK", f"FTP **{fname}** deleted.", {"ftp_name": fname})
+            return AdapterResult(False, "API_ERROR", f"Delete FTP failed ({r.status_code})")
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def set_read_only_filesystem(
+        self,
+        *,
+        project_id: str | None = None,
+        app_name: str | None = None,
+        enabled: bool,
+    ) -> AdapterResult:
+        resolved, fail = await self._require_project(project_id=project_id, app_name=app_name)
+        if fail:
+            return fail
+        status = self._toggle_path(enabled)
+        try:
+            r = await self._post_empty(f"/v1/projects/{resolved}/read-only/{status}")
+            if r.status_code >= 400:
+                return AdapterResult(False, "API_ERROR", f"Read-only toggle failed ({r.status_code})")
+            state = "enabled" if enabled else "disabled"
+            return AdapterResult(
+                True,
+                "OK",
+                f"Read-only filesystem **{state}** for **{resolved}**.",
+                {"project_id": resolved, "read_only": enabled},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def set_default_subdomain(
+        self,
+        *,
+        project_id: str | None = None,
+        app_name: str | None = None,
+        enabled: bool,
+    ) -> AdapterResult:
+        resolved, fail = await self._require_project(project_id=project_id, app_name=app_name)
+        if fail:
+            return fail
+        status = self._toggle_path(enabled)
+        try:
+            r = await self._post_empty(f"/v1/projects/{resolved}/default-subdomain/{status}")
+            if r.status_code >= 400:
+                return AdapterResult(False, "API_ERROR", f"Default subdomain toggle failed ({r.status_code})")
+            state = "enabled" if enabled else "disabled"
+            return AdapterResult(
+                True,
+                "OK",
+                f"Default `*.liara.run` subdomain **{state}** for **{resolved}**.",
+                {"project_id": resolved, "default_subdomain": enabled},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))
+
+    async def set_fixed_ip(
+        self,
+        *,
+        project_id: str | None = None,
+        app_name: str | None = None,
+        enabled: bool,
+    ) -> AdapterResult:
+        resolved, fail = await self._require_project(project_id=project_id, app_name=app_name)
+        if fail:
+            return fail
+        status = self._toggle_path(enabled)
+        try:
+            r = await self._post_empty(f"/v1/projects/{resolved}/fixed-ip/{status}")
+            if r.status_code >= 400:
+                return AdapterResult(False, "API_ERROR", f"Fixed IP toggle failed ({r.status_code})")
+            body = r.json() if r.content else {}
+            ip = body.get("IP") if isinstance(body, dict) else None
+            state = "enabled" if enabled else "disabled"
+            msg = f"Static/fixed IP **{state}** for **{resolved}**."
+            if ip:
+                msg += f" IP: `{ip}`."
+            return AdapterResult(
+                True,
+                "OK",
+                msg,
+                {"project_id": resolved, "fixed_ip": enabled, "ip": ip},
+            )
+        except httpx.HTTPError as e:
+            return AdapterResult(False, "NETWORK_ERROR", str(e))

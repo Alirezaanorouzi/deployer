@@ -41,6 +41,31 @@ class PipelineStartRequest(BaseModel):
     liara_app_name: str | None = None
 
 
+class CursorChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=16000)
+    session_id: str | None = None
+    run_id: str | None = None
+    repo: str | None = None
+    deploy_log: str | None = Field(default=None, max_length=50000)
+    include_terminal_log: bool = False
+
+
+class TerminalLogResponse(BaseModel):
+    run_id: str | None = None
+    text: str = ""
+    line_count: int = 0
+    truncated: bool = False
+
+
+class CursorChatResponse(BaseModel):
+    ok: bool
+    session_id: str
+    status: str = ""
+    reply: str = ""
+    workspace: str = ""
+    error: str | None = None
+
+
 class RunStepOut(BaseModel):
     seq: int
     name: str

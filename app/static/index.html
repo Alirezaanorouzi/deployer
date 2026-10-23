@@ -26,14 +26,228 @@
     .main-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
     .left-panel {
       flex: 1;
-      padding: 0.75rem 1rem;
+      padding: 0.5rem 1rem 0;
       min-width: 0;
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: 0.35rem;
       overflow: hidden;
+      --left-pad-x: 1rem;
     }
-    .left-top { flex-shrink: 0; }
+    .left-toolbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      flex-wrap: wrap;
+      min-height: 36px;
+    }
+    .toolbar-meta { margin: 0; font-size: 0.78rem; color: var(--muted); }
+    .repo-dropdown { position: relative; }
+    .repo-dropdown-btn {
+      margin: 0;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid #2d3a4f;
+      border-radius: 8px;
+      max-width: min(340px, 55vw);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .repo-dropdown-btn:hover { border-color: #3d5a80; }
+    .repo-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 50;
+      min-width: 300px;
+      max-width: min(420px, 92vw);
+      max-height: min(360px, 50vh);
+      overflow-y: auto;
+      background: var(--card);
+      border: 1px solid #2d3a4f;
+      border-radius: 10px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+      padding: 0.35rem 0;
+    }
+    .repo-dropdown-menu[hidden] { display: none !important; }
+    .repo-dropdown-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin: 0;
+      padding: 0.5rem 0.9rem;
+      background: transparent;
+      color: var(--text);
+      font-weight: 500;
+      font-size: 0.84rem;
+      border: none;
+      border-radius: 0;
+      cursor: pointer;
+    }
+    .repo-dropdown-item:hover { background: #1a2535; }
+    .repo-dropdown-item.is-selected { color: var(--accent); background: #15202e; }
+    .repo-dropdown-refresh {
+      border-top: 1px solid #2d3a4f;
+      margin-top: 0.2rem;
+      color: var(--muted) !important;
+      font-size: 0.8rem !important;
+    }
+    .left-banners { flex-shrink: 0; width: 100%; }
+    .left-banners .approval-bar,
+    .left-banners .success-link { margin-top: 0; }
+    .cursor-panel {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid #252b36;
+      border-radius: 8px;
+      background: #0c1018;
+    }
+    .cursor-panel-header {
+      flex-shrink: 0;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #252b36;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      background: #0e1219;
+    }
+    .cursor-panel-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.02em;
+    }
+    .cursor-panel-header button {
+      margin: 0;
+      padding: 0.25rem 0.55rem;
+      font-size: 0.72rem;
+      font-weight: 500;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid #2d3a4f;
+      border-radius: 6px;
+    }
+    .cursor-panel-header button:hover { color: var(--text); border-color: #3d5a80; }
+    .cursor-thread {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .cursor-thread-empty {
+      font-size: 0.78rem;
+      color: #5c6b80;
+      line-height: 1.5;
+      padding: 0.25rem 0;
+    }
+    .cursor-msg {
+      font-size: 0.8rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      padding: 0.5rem 0.65rem;
+      border-radius: 8px;
+    }
+    .cursor-msg.user {
+      background: #1a2433;
+      border: 1px solid #2a3548;
+      color: #d8dee8;
+      align-self: flex-end;
+      max-width: 95%;
+    }
+    .cursor-msg.assistant {
+      background: transparent;
+      border: none;
+      padding: 0.35rem 0;
+      color: #b8c4d4;
+      max-width: 100%;
+    }
+    .cursor-msg.error {
+      background: transparent;
+      border: none;
+      padding: 0.35rem 0;
+      color: #e8a0a0;
+    }
+    .cursor-msg.assistant.streaming {
+      color: #a8b8cc;
+      min-height: 1.5em;
+    }
+    .cursor-msg[dir="rtl"] {
+      text-align: right;
+      unicode-bidi: plaintext;
+    }
+    .cursor-activity {
+      font-size: 0.72rem;
+      color: #6a8fad;
+      margin-bottom: 0.4rem;
+      line-height: 1.45;
+      font-style: italic;
+    }
+    .cursor-stream-body {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .cursor-composer {
+      flex-shrink: 0;
+      padding: 0.55rem 0.75rem 0.65rem;
+      border-top: 1px solid #252b36;
+      background: #0e1219;
+    }
+    .cursor-composer-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.5rem;
+    }
+    .cursor-composer textarea {
+      flex: 1;
+      min-height: 44px;
+      max-height: 120px;
+      margin: 0;
+      font-size: 0.82rem;
+      resize: none;
+      border-radius: 8px;
+    }
+    .cursor-composer button#cursorSend {
+      margin: 0;
+      flex-shrink: 0;
+      padding: 0.5rem 0.85rem;
+      font-size: 0.8rem;
+      border-radius: 8px;
+    }
+    .cursor-status {
+      font-size: 0.68rem;
+      color: #5c6b80;
+      margin: 0;
+      flex: 1;
+      min-width: 0;
+      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .terminal-dock {
+      flex: 0 0 auto;
+      width: calc(100% + 2 * var(--left-pad-x));
+      margin-left: calc(-1 * var(--left-pad-x));
+      margin-right: calc(-1 * var(--left-pad-x));
+      margin-bottom: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
     .right-sidebar {
       width: var(--sidebar-w);
       flex-shrink: 0;
@@ -62,16 +276,16 @@
     button.warn { background: #ffc857; color: #222; }
     #terminal {
       background: var(--term);
-      border: 1px solid #2d3a4f;
-      border-radius: 10px;
-      padding: 0.75rem;
+      border: none;
+      border-radius: 0;
+      padding: 0.5rem 0.75rem 0.65rem;
       flex: 1;
       min-height: 0;
       overflow-y: auto;
       font-size: 0.78rem;
       line-height: 1.45;
       white-space: pre-wrap;
-      margin-top: 0.5rem;
+      margin: 0;
       font-family: ui-monospace, monospace;
     }
     .success-link { display: none; margin-top: 1rem; padding: 1rem; background: #0d2818; border: 1px solid var(--accent); border-radius: 10px; text-align: center; }
@@ -131,6 +345,11 @@
     .chat-meta button.copy-btn { background: transparent; color: var(--muted); padding: 0.15rem 0.35rem; margin: 0; font-size: 0.7rem; font-weight: 500; border: 1px solid #2d3a4f; }
     .chat-meta button.copy-btn:hover { color: var(--text); }
     .chat-thinking { color: var(--muted); font-style: italic; }
+    .chat-agent-streaming {
+      color: #9aa3b2;
+      white-space: pre-wrap;
+    }
+    .chat-agent-streaming strong { color: #a8b0be; font-weight: 600; }
     .chat-live-indicator { font-size: 0.72rem; color: #6eb5ff; margin-top: 0.35rem; }
     .chat-agent-block strong { color: #eef3fa; font-weight: 600; font-family: var(--font-fa); }
     .chat-thinking,
@@ -162,46 +381,173 @@
       flex-direction: column;
       min-height: 0;
       margin: 0;
+      padding: 0;
+      border-radius: 0;
+      background: var(--term);
+      border: none;
+      border-top: 1px solid #2d3a4f;
     }
-    .terminal-card h2 { flex-shrink: 0; }
+    .terminal-head {
+      flex-shrink: 0;
+      margin: 0;
+      padding: 0.35rem 0.5rem 0.35rem 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      background: #12171f;
+      border-bottom: 1px solid #252b36;
+    }
+    .terminal-title {
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .terminal-to-cursor {
+      margin: 0;
+      padding: 0.25rem 0.55rem;
+      font-size: 1rem;
+      line-height: 1;
+      font-weight: 700;
+      background: #1a2535;
+      color: var(--accent);
+      border: 1px solid #2d4a3f;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .terminal-to-cursor:hover:not(:disabled) {
+      background: #1e2e42;
+      border-color: var(--accent);
+    }
+    .terminal-to-cursor:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .terminal-wrap {
+      flex: 0 0 auto;
+      height: 340px;
+      min-height: 120px;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .terminal-resize-handle {
+      flex-shrink: 0;
+      height: 8px;
+      margin: 0;
+      cursor: ns-resize;
+      position: relative;
+      touch-action: none;
+      background: transparent;
+    }
+    .terminal-resize-handle::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 1px;
+      background: #2d3a4f;
+    }
+    .terminal-resize-handle:hover,
+    .terminal-resize-handle.is-dragging {
+      background: rgba(0, 212, 170, 0.12);
+    }
+    .terminal-resize-handle:hover::after,
+    .terminal-resize-handle.is-dragging::after {
+      background: var(--accent);
+      height: 2px;
+    }
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      border: 0;
+    }
   </style>
 </head>
 <body>
   <div class="app-shell">
     <div class="main-layout">
       <main class="left-panel">
-        <div class="left-top grid">
-          <div class="card">
-            <h2>Deploy pipeline</h2>
-            <label>GitHub repository</label>
-            <select id="ghRepo"><option value="">Loading…</option></select>
-            <label>Monorepo subpath (optional)</label>
-            <input id="ghSubpath" placeholder="e.g. apps/web" />
-            <label>Liara app name (optional)</label>
-            <input id="liaraApp" placeholder="auto from repo name" />
-            <label>Workspace API key</label>
-            <input id="apiKey" value="dev-local-key" />
-            <button id="deployBtn">Deploy to Liara</button>
-            <button class="secondary" id="refreshBtn">Refresh repos</button>
-            <p id="runMeta" class="sub"></p>
+        <header class="left-toolbar">
+          <div class="repo-dropdown" id="repoDropdown">
+            <button
+              type="button"
+              class="repo-dropdown-btn"
+              id="repoDropdownBtn"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+            >Loading repositories…</button>
+            <div class="repo-dropdown-menu" id="repoDropdownMenu" role="listbox" hidden></div>
           </div>
-          <div class="card">
-            <h2>Run state</h2>
-            <p>State: <strong id="runState">—</strong></p>
-            <div class="approval-bar" id="approvalBar">
-              <p><strong>Approval required</strong> — create Liara app and deploy.</p>
-              <button class="warn" id="approveBtn">Approve &amp; continue</button>
-            </div>
-            <div class="success-link" id="successBox">
-              <p>Your site is ready</p>
-              <a id="siteLink" href="#" target="_blank" rel="noopener">Open site</a>
-            </div>
+          <span id="runMeta" class="toolbar-meta"></span>
+        </header>
+        <div class="left-banners">
+          <div class="approval-bar" id="approvalBar">
+            <p><strong>Approval required</strong> — create Liara app and deploy.</p>
+            <button type="button" class="warn" id="approveBtn">Approve &amp; continue</button>
+          </div>
+          <div class="success-link" id="successBox">
+            <p>Your site is ready</p>
+            <a id="siteLink" href="#" target="_blank" rel="noopener">Open site</a>
           </div>
         </div>
+        <input type="hidden" id="apiKey" value="dev-local-key" />
+        <input type="hidden" id="ghSubpath" value="" />
+        <input type="hidden" id="liaraApp" value="" />
+        <select id="ghRepo" class="visually-hidden" tabindex="-1" aria-hidden="true">
+          <option value="">Loading…</option>
+        </select>
 
-        <div class="card terminal-card">
-          <h2>Terminal</h2>
-          <div id="terminal"></div>
+        <section class="cursor-panel" id="cursorPanel" aria-label="Cursor SDK">
+          <div class="cursor-panel-header">
+            <span class="cursor-panel-title">Cursor</span>
+            <span class="cursor-status" id="cursorStatus">Checking API…</span>
+            <button type="button" id="cursorNewSession" title="New session">New chat</button>
+          </div>
+          <div class="cursor-thread" id="cursorThread" aria-live="polite">
+            <p class="cursor-thread-empty">Local agent on your repo clone. Terminal ↑ attaches deploy logs. Progress appears in the chat while Cursor works.</p>
+          </div>
+          <div class="cursor-composer">
+            <div class="cursor-composer-row">
+              <textarea id="cursorInput" rows="2" placeholder="Message Cursor…"></textarea>
+              <button type="button" id="cursorSend">Send</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="terminal-dock" id="terminalDock">
+          <div
+            class="terminal-resize-handle"
+            id="terminalResizeHandle"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize terminal"
+            title="Drag up to make the terminal taller"
+          ></div>
+          <div class="terminal-wrap" id="terminalWrap">
+            <div class="card terminal-card">
+              <div class="terminal-head">
+                <span class="terminal-title">Terminal</span>
+                <button
+                  type="button"
+                  id="terminalToCursor"
+                  class="terminal-to-cursor"
+                  title="Send terminal output to Cursor"
+                  aria-label="Send terminal output to Cursor"
+                >↑</button>
+              </div>
+              <div id="terminal"></div>
+            </div>
+          </div>
         </div>
       </main>
 
@@ -231,18 +577,73 @@
     let agentThinkingText = '';
     const CHAT_STORAGE_KEY = 'deployer_chat_v1';
     const CHAT_MAX_TURNS = 20;
+    const REPO_STORAGE_KEY = 'deployer_selected_repo';
+    const CURSOR_SESSION_KEY = 'deployer_cursor_session_id';
+    const CURSOR_LOG_MAX = 48000;
 
     const apiKey = () => document.getElementById('apiKey').value;
     const headers = () => ({ 'Content-Type': 'application/json', 'X-API-Key': apiKey() });
+
+    function showSavedRepoFromCache() {
+      const saved = (localStorage.getItem(REPO_STORAGE_KEY) || '').trim();
+      if (!saved) return;
+      const btn = document.getElementById('repoDropdownBtn');
+      if (btn) btn.textContent = saved + ' ▾';
+      const app = saved.includes('/') ? saved.split('/').pop() : '';
+      const appEl = document.getElementById('liaraApp');
+      if (app && appEl) appEl.value = app;
+    }
+
+    function healChatMemoryOnLoad() {
+      const memory = loadChatMemory();
+      if (!memory.length) return;
+      const now = Date.now();
+      let changed = false;
+      for (const turn of memory) {
+        if (!turn.pending) continue;
+        const age = now - (turn.startedAt || turn.at || 0);
+        if (age < 90000) continue;
+        turn.pending = false;
+        turn.agentLive = false;
+        turn.streaming = false;
+        if (turn.assistant === 'Thinking…' || !turn.assistant?.trim()) {
+          turn.assistant = 'Previous run was interrupted (page refresh). You can send a new message.';
+        }
+        changed = true;
+      }
+      if (changed) saveChatMemory(memory);
+    }
+
+    showSavedRepoFromCache();
+
+    function bootPageIntegrations() {
+      void loadRepos();
+      void refreshCursorStatus();
+      syncTerminalToCursorButton();
+    }
+    queueMicrotask(bootPageIntegrations);
+
+    function getTerminalLog() {
+      const text = (document.getElementById('terminal').textContent || '').trim();
+      if (!text) return '';
+      return text.length > CURSOR_LOG_MAX ? text.slice(-CURSOR_LOG_MAX) : text;
+    }
 
     function term(line) {
       const el = document.getElementById('terminal');
       el.textContent += line + '\n';
       el.scrollTop = el.scrollHeight;
+      syncTerminalToCursorButton();
     }
 
     function clearTerm() {
       document.getElementById('terminal').textContent = '';
+      syncTerminalToCursorButton();
+    }
+
+    function syncTerminalToCursorButton() {
+      const btn = document.getElementById('terminalToCursor');
+      if (btn) btn.disabled = !getTerminalLog();
     }
 
     function loadChatMemory() {
@@ -329,11 +730,16 @@
           const block = document.createElement('div');
           block.className = 'chat-agent-block';
           const body = document.createElement('div');
-          if (turn.pending) {
+          const isThinkingOnly = turn.pending && turn.assistant === 'Thinking…';
+          const isLiveText =
+            turn.streaming ||
+            (turn.pending && turn.assistant !== 'Thinking…') ||
+            (turn.agentLive && agentStreamActive && !turn.durationMs);
+          if (isThinkingOnly) {
             body.className = 'chat-thinking';
             body.textContent = turn.assistant;
           } else {
-            body.style.whiteSpace = 'pre-wrap';
+            body.className = isLiveText ? 'chat-agent-streaming' : '';
             body.innerHTML = formatAgentText(turn.assistant);
             applyAgentDirection(body, turn.assistant);
           }
@@ -399,6 +805,7 @@
       for (let i = memory.length - 1; i >= 0; i--) {
         if (memory[i].pending) {
           memory[i].pending = false;
+          memory[i].streaming = false;
           memory[i].assistant = assistantText || memory[i].assistant;
           memory[i].at = Date.now();
           memory[i].durationMs = extra?.durationMs ?? (Date.now() - (memory[i].startedAt || memory[i].at));
@@ -434,7 +841,54 @@
     }
 
     function isStreamingSkill(skillId) {
-      return !!skillId && (skillId.startsWith('liara.') || skillId === 'agent.summarize');
+      return !!skillId && (skillId.startsWith('liara.') || skillId === 'agent.summarize' || skillId === 'agent.chat');
+    }
+
+    function stripAnsi(s) {
+      return (s || '').replace(/\x1b\[[0-9;]*m/g, '');
+    }
+
+    function deployChatLineFromLog(line) {
+      const t = stripAnsi(line).trim();
+      if (!t) return '';
+      if (t.startsWith('— Liara CLI')) return t;
+      if (/deployment finished successfully/i.test(t)) return t;
+      if (/build finished|upload finished|release created|creating an archive|checking container/i.test(t)) return t;
+      if (/^https?:\/\//i.test(t)) return t;
+      if (/\.liara\.run/i.test(t)) return t;
+      if (/^> (Fetching|Pulling|Preparing|Building)/i.test(t)) return t;
+      if (/^Step \d+\//i.test(t)) return t;
+      if (/^(App:|Path:|Platform:|Port:)/i.test(t)) return t;
+      return '';
+    }
+
+    function syncChatWithLogLine(line) {
+      const memory = loadChatMemory();
+      if (!memory.length) return;
+      const turn = memory[memory.length - 1];
+      if (!turn.pending && !turn.agentLive) return;
+      const milestone = deployChatLineFromLog(line);
+      const preview = milestone || stripAnsi(line).trim().slice(0, 140);
+      if (!preview) return;
+      if (turn.assistant === 'Thinking…') {
+        turn.assistant = 'Deploy in progress…\n\n' + (milestone || preview);
+      } else if (milestone && !turn.assistant.includes(milestone)) {
+        turn.assistant = turn.assistant + '\n' + milestone;
+      } else if (!milestone) {
+        const lines = turn.assistant.split('\n');
+        const last = lines[lines.length - 1] || '';
+        if (last.startsWith('… ') || last.length < 120) {
+          lines[lines.length - 1] = '… ' + preview;
+        } else {
+          lines.push('… ' + preview);
+        }
+        turn.assistant = lines.join('\n');
+      }
+      turn.agentLive = true;
+      turn.pending = true;
+      turn.at = Date.now();
+      saveChatMemory(memory);
+      renderChatThread();
     }
 
     function appendStreamTokenToLatestAssistant(delta, streamStart, newBlock) {
@@ -485,8 +939,9 @@
     function chatHistoryForApi() {
       const memory = loadChatMemory();
       const out = [];
-      memory.forEach(turn => {
-        if (turn.pending) return;
+      memory.forEach((turn, idx) => {
+        const isCurrentPending = turn.pending && idx === memory.length - 1;
+        if (isCurrentPending) return;
         if (turn.user) out.push({ role: 'user', content: turn.user });
         if (turn.assistant && turn.assistant !== 'Thinking…') {
           out.push({ role: 'assistant', content: turn.assistant });
@@ -495,20 +950,433 @@
       return out.slice(-12);
     }
 
-    renderChatThread();
+    healChatMemoryOnLoad();
+    requestAnimationFrame(() => renderChatThread());
 
-    async function loadRepos() {
-      const res = await fetch('/integrations/github/repos', { headers: { 'X-API-Key': apiKey() } });
-      const data = await res.json();
-      const sel = document.getElementById('ghRepo');
-      sel.innerHTML = '';
-      (data.repos || []).forEach(r => {
-        const o = document.createElement('option');
-        o.value = r.full_name;
-        o.textContent = r.full_name;
-        sel.appendChild(o);
+    function closeRepoMenu() {
+      const menu = document.getElementById('repoDropdownMenu');
+      menu.hidden = true;
+      document.getElementById('repoDropdownBtn').setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleRepoMenu() {
+      const menu = document.getElementById('repoDropdownMenu');
+      const willOpen = menu.hidden;
+      menu.hidden = !willOpen;
+      document.getElementById('repoDropdownBtn').setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    }
+
+    function cursorSessionId() {
+      return sessionStorage.getItem(CURSOR_SESSION_KEY) || '';
+    }
+
+    function setCursorSessionId(id) {
+      if (id) sessionStorage.setItem(CURSOR_SESSION_KEY, id);
+      else sessionStorage.removeItem(CURSOR_SESSION_KEY);
+    }
+
+    let cursorStreamEl = null;
+    let cursorStreamBody = null;
+    let cursorActivityEl = null;
+    let cursorHeartbeatTimer = null;
+
+    const CURSOR_RTL_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+    function applyCursorTextDir(el, text) {
+      if (!el) return;
+      const rtl = CURSOR_RTL_RE.test(text || '');
+      el.dir = rtl ? 'rtl' : 'auto';
+    }
+
+    function appendCursorMsg(role, text) {
+      const thread = document.getElementById('cursorThread');
+      thread.querySelector('.cursor-thread-empty')?.remove();
+      const div = document.createElement('div');
+      div.className = 'cursor-msg ' + role;
+      div.textContent = text;
+      applyCursorTextDir(div, text);
+      thread.appendChild(div);
+      thread.scrollTop = thread.scrollHeight;
+      return div;
+    }
+
+    function beginCursorStream() {
+      cursorStreamEl = appendCursorMsg('assistant', '');
+      cursorStreamEl.classList.add('streaming');
+      cursorStreamEl.textContent = '';
+      cursorActivityEl = document.createElement('div');
+      cursorActivityEl.className = 'cursor-activity';
+      cursorStreamBody = document.createElement('div');
+      cursorStreamBody.className = 'cursor-stream-body';
+      cursorStreamEl.appendChild(cursorActivityEl);
+      cursorStreamEl.appendChild(cursorStreamBody);
+      pushCursorActivity('Connecting…');
+    }
+
+    function pushCursorActivity(text) {
+      if (!cursorActivityEl || !text) return;
+      const line = text.trim();
+      if (!line) return;
+      const prev = cursorActivityEl.textContent.trim();
+      if (prev.endsWith(line)) return;
+      const lines = prev ? prev.split('\n').filter(Boolean) : [];
+      lines.push(line);
+      while (lines.length > 3) lines.shift();
+      cursorActivityEl.textContent = lines.join('\n');
+      const thread = document.getElementById('cursorThread');
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function appendCursorStreamDelta(text) {
+      if (!cursorStreamBody || !text) return;
+      cursorStreamBody.textContent += text;
+      applyCursorTextDir(cursorStreamBody, cursorStreamBody.textContent);
+      if (cursorStreamEl) applyCursorTextDir(cursorStreamEl, cursorStreamBody.textContent);
+      const thread = document.getElementById('cursorThread');
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function stopCursorHeartbeat() {
+      if (cursorHeartbeatTimer) {
+        clearInterval(cursorHeartbeatTimer);
+        cursorHeartbeatTimer = null;
+      }
+    }
+
+    function startCursorHeartbeat() {
+      stopCursorHeartbeat();
+      cursorHeartbeatTimer = setInterval(() => {
+        pushCursorActivity('Still working — tools may take several minutes…');
+      }, 40000);
+    }
+
+    function endCursorStream(ok, reply, errText) {
+      stopCursorHeartbeat();
+      const finalText = (reply || errText || '').trim();
+      if (!cursorStreamEl) {
+        if (!ok) appendCursorMsg('error', finalText || 'Cursor run failed');
+        else if (finalText) appendCursorMsg('assistant', finalText);
+        return;
+      }
+      cursorStreamEl.classList.remove('streaming');
+      if (!ok) {
+        cursorStreamEl.classList.add('error');
+        cursorStreamEl.classList.remove('assistant');
+        if (cursorActivityEl) cursorActivityEl.remove();
+        if (cursorStreamBody) {
+          cursorStreamBody.textContent = finalText || 'Cursor run failed';
+          applyCursorTextDir(cursorStreamBody, cursorStreamBody.textContent);
+        } else {
+          cursorStreamEl.textContent = finalText || 'Cursor run failed';
+          applyCursorTextDir(cursorStreamEl, cursorStreamEl.textContent);
+        }
+      } else if (finalText) {
+        if (cursorActivityEl) cursorActivityEl.remove();
+        if (cursorStreamBody) {
+          cursorStreamBody.textContent = finalText;
+          applyCursorTextDir(cursorStreamBody, finalText);
+          applyCursorTextDir(cursorStreamEl, finalText);
+        } else {
+          cursorStreamEl.textContent = finalText;
+          applyCursorTextDir(cursorStreamEl, finalText);
+        }
+      }
+      cursorStreamEl = null;
+      cursorStreamBody = null;
+      cursorActivityEl = null;
+    }
+
+    function consumeSseBuffer(buffer, onEvent) {
+      const blocks = buffer.split('\n\n');
+      const rest = blocks.pop() || '';
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+        let ev = 'message';
+        let dataLine = '';
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) ev = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLine = line.slice(5).trim();
+        }
+        if (!dataLine) continue;
+        try {
+          onEvent(ev, JSON.parse(dataLine));
+        } catch (_) {}
+      }
+      return rest;
+    }
+
+    async function refreshCursorStatus() {
+      const el = document.getElementById('cursorStatus');
+      try {
+        const res = await fetch('/cursor/status', { headers: { 'X-API-Key': apiKey() } });
+        const data = await res.json();
+        if (data.configured) {
+          const rt = (data.runtime || 'local') === 'cloud' ? 'Cloud' : 'Local';
+          el.textContent = rt + ' · ' + (data.model || 'composer-2.5');
+        } else {
+          el.textContent = 'API key missing';
+        }
+      } catch (_) {
+        el.textContent = 'Could not reach Cursor status endpoint';
+      }
+    }
+
+    const CURSOR_DEFAULT_FROM_TERMINAL =
+      'Using the deployment log below: identify the root cause, apply minimal fixes in cwd, and summarize what you changed. Run build only if needed to verify.';
+
+    async function fetchServerTerminalLog() {
+      const q = currentRunId ? ('?run_id=' + encodeURIComponent(currentRunId)) : '';
+      try {
+        const res = await fetch('/terminal/log' + q, { headers: { 'X-API-Key': apiKey() } });
+        if (!res.ok) return '';
+        const data = await res.json();
+        return (data.text || '').trim();
+      } catch (_) {
+        return '';
+      }
+    }
+
+    async function sendCursorChat(options = {}) {
+      const input = document.getElementById('cursorInput');
+      const useServerLog = !!options.useServerTerminalLog;
+      const attachLog = options.attachLog !== false;
+      let msg = (options.message != null ? options.message : input.value).trim();
+      if (!msg) return false;
+      if (options.message == null) input.value = '';
+
+      let deployLog = null;
+      let logLineCount = 0;
+      if (useServerLog || (attachLog && currentRunId)) {
+        deployLog = await fetchServerTerminalLog();
+        logLineCount = deployLog ? deployLog.split('\n').length : 0;
+      }
+      if (!deployLog && attachLog) {
+        deployLog = options.deployLog != null ? options.deployLog : getTerminalLog();
+        logLineCount = deployLog ? deployLog.split('\n').length : 0;
+      }
+      const includeTerminalLog = !!(useServerLog || (attachLog && currentRunId && deployLog));
+
+      const userLabel = deployLog && options.fromTerminal
+        ? msg + '\n\n↳ terminal log (' + logLineCount + ' lines from server)'
+        : msg;
+      appendCursorMsg('user', userLabel);
+      beginCursorStream();
+      startCursorHeartbeat();
+
+      const btn = document.getElementById('cursorSend');
+      const termBtn = document.getElementById('terminalToCursor');
+      btn.disabled = true;
+      if (termBtn) termBtn.disabled = true;
+      const prevBtnLabel = btn.textContent;
+      btn.textContent = '…';
+      const repo = document.getElementById('ghRepo').value.trim() || null;
+      let donePayload = null;
+      try {
+        const res = await fetch('/cursor/chat/stream', {
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({
+            message: msg,
+            session_id: cursorSessionId() || null,
+            run_id: currentRunId || null,
+            repo,
+            deploy_log: includeTerminalLog ? null : (deployLog || null),
+            include_terminal_log: includeTerminalLog,
+          }),
+        });
+        if (!res.ok || !res.body) {
+          const raw = await res.text();
+          endCursorStream(false, '', raw.slice(0, 500) || ('HTTP ' + res.status));
+        } else {
+          const reader = res.body.getReader();
+          const dec = new TextDecoder();
+          let sseBuf = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            sseBuf = consumeSseBuffer(sseBuf + dec.decode(value, { stream: true }), (ev, data) => {
+              if (ev === 'session' && data.session_id) setCursorSessionId(data.session_id);
+              if (ev === 'status' && data.text) pushCursorActivity(data.text);
+              if (ev === 'activity' && data.text) pushCursorActivity(data.text);
+              if (ev === 'delta' && data.text) appendCursorStreamDelta(data.text);
+              if (ev === 'final' && data.text) {
+                if (cursorStreamBody) {
+                  cursorStreamBody.textContent = data.text;
+                  applyCursorTextDir(cursorStreamBody, data.text);
+                  if (cursorStreamEl) applyCursorTextDir(cursorStreamEl, data.text);
+                }
+              }
+              if (ev === 'error' && data.text) pushCursorActivity(data.text);
+              if (ev === 'done') donePayload = data;
+            });
+          }
+          if (donePayload) {
+            if (donePayload.session_id) setCursorSessionId(donePayload.session_id);
+            endCursorStream(
+              !!donePayload.ok,
+              donePayload.reply || '',
+              donePayload.reply || donePayload.error || 'Cursor run failed',
+            );
+            if (donePayload.workspace) {
+              const ws = String(donePayload.workspace);
+              const label = ws.startsWith('cloud:') ? ws : ws.split(/[/\\]/).pop();
+              document.getElementById('cursorStatus').textContent = 'Workspace · ' + label;
+            }
+          } else {
+            endCursorStream(false, '', 'Stream ended without a result');
+          }
+        }
+      } catch (e) {
+        endCursorStream(false, '', String(e.message || e));
+      } finally {
+        stopCursorHeartbeat();
+        btn.disabled = false;
+        btn.textContent = prevBtnLabel || 'Send';
+        syncTerminalToCursorButton();
+      }
+      return true;
+    }
+
+    async function sendTerminalToCursor() {
+      const serverLog = await fetchServerTerminalLog();
+      const uiLog = getTerminalLog();
+      if (!serverLog && !uiLog) return;
+      const input = document.getElementById('cursorInput');
+      const msg = input.value.trim() || CURSOR_DEFAULT_FROM_TERMINAL;
+      if (!input.value.trim()) input.value = '';
+      await sendCursorChat({
+        message: msg,
+        fromTerminal: true,
+        useServerTerminalLog: true,
+        deployLog: uiLog && !serverLog ? uiLog : null,
       });
     }
+
+    function newCursorSession() {
+      const sid = cursorSessionId();
+      if (sid) {
+        fetch('/cursor/session/' + encodeURIComponent(sid), {
+          method: 'DELETE',
+          headers: { 'X-API-Key': apiKey() },
+        }).catch(() => {});
+      }
+      setCursorSessionId('');
+      document.getElementById('cursorThread').innerHTML =
+        '<p class="cursor-thread-empty">New chat — terminal ↑ attaches deploy logs when you send.</p>';
+      refreshCursorStatus();
+    }
+
+    document.getElementById('cursorSend').onclick = () => { sendCursorChat(); };
+    document.getElementById('terminalToCursor').onclick = () => { sendTerminalToCursor(); };
+    document.getElementById('cursorNewSession').onclick = newCursorSession;
+    document.getElementById('cursorInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendCursorChat();
+      }
+    });
+
+    function setSelectedRepo(fullName) {
+      const sel = document.getElementById('ghRepo');
+      if (fullName && [...sel.options].some(o => o.value === fullName)) {
+        sel.value = fullName;
+      } else if (!fullName) {
+        sel.value = '';
+      }
+      localStorage.setItem(REPO_STORAGE_KEY, fullName || '');
+      const btn = document.getElementById('repoDropdownBtn');
+      btn.textContent = fullName ? fullName + ' ▾' : 'Select repository ▾';
+      const app =
+        fullName && fullName.includes('/') ? fullName.split('/').pop() : '';
+      document.getElementById('liaraApp').value = app || '';
+      document.querySelectorAll('.repo-dropdown-item[data-repo]').forEach(el => {
+        el.classList.toggle('is-selected', el.dataset.repo === fullName);
+      });
+    }
+
+    let reposLoadInFlight = false;
+
+    async function loadRepos() {
+      if (reposLoadInFlight) return;
+      reposLoadInFlight = true;
+      const btn = document.getElementById('repoDropdownBtn');
+      const prev = document.getElementById('ghRepo').value || localStorage.getItem(REPO_STORAGE_KEY) || '';
+      if (!prev) btn.textContent = 'Loading repositories…';
+      let data;
+      try {
+        const res = await fetch('/integrations/github/repos', {
+          headers: { 'X-API-Key': apiKey() },
+          signal: AbortSignal.timeout(25000),
+        });
+        data = await res.json();
+        if (!res.ok) {
+          const detail = typeof data.detail === 'string' ? data.detail : ('HTTP ' + res.status);
+          btn.textContent = prev ? prev + ' ▾' : 'Repo load failed ▾';
+          term('GitHub repos: ' + detail);
+          reposLoadInFlight = false;
+          return;
+        }
+      } catch (e) {
+        btn.textContent = prev ? prev + ' ▾' : 'Repo load failed ▾';
+        const msg = e.name === 'TimeoutError' ? 'GitHub repos timed out (server busy?)' : (e.message || e);
+        term('GitHub repos: ' + msg);
+        reposLoadInFlight = false;
+        return;
+      }
+      const sel = document.getElementById('ghRepo');
+      const menu = document.getElementById('repoDropdownMenu');
+      sel.innerHTML = '';
+      menu.innerHTML = '';
+      const repos = data.repos || [];
+      if (!repos.length) {
+        const o = document.createElement('option');
+        o.value = '';
+        o.textContent = 'No repositories';
+        sel.appendChild(o);
+        btn.textContent = 'No repositories ▾';
+        const empty = document.createElement('div');
+        empty.className = 'repo-dropdown-item';
+        empty.style.pointerEvents = 'none';
+        empty.style.color = 'var(--muted)';
+        empty.textContent = 'No repositories found';
+        menu.appendChild(empty);
+      } else {
+        repos.forEach(r => {
+          const o = document.createElement('option');
+          o.value = r.full_name;
+          o.textContent = r.full_name;
+          sel.appendChild(o);
+          const item = document.createElement('button');
+          item.type = 'button';
+          item.className = 'repo-dropdown-item';
+          item.dataset.repo = r.full_name;
+          item.textContent = r.full_name;
+          item.onclick = () => {
+            setSelectedRepo(r.full_name);
+            closeRepoMenu();
+          };
+          menu.appendChild(item);
+        });
+        const refresh = document.createElement('button');
+        refresh.type = 'button';
+        refresh.className = 'repo-dropdown-item repo-dropdown-refresh';
+        refresh.textContent = '↻ Refresh list';
+        refresh.onclick = () => loadRepos();
+        menu.appendChild(refresh);
+        const pick =
+          prev && repos.some(r => r.full_name === prev) ? prev : repos[0].full_name;
+        setSelectedRepo(pick);
+      }
+      reposLoadInFlight = false;
+    }
+
+    document.getElementById('repoDropdownBtn').addEventListener('click', e => {
+      e.stopPropagation();
+      toggleRepoMenu();
+    });
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.repo-dropdown')) closeRepoMenu();
+    });
 
     function connectStream(runId) {
       if (eventSource) eventSource.close();
@@ -519,7 +1387,9 @@
       eventSource.addEventListener('connected', () => term('— stream connected —'));
       eventSource.addEventListener('log_line', e => {
         const d = JSON.parse(e.data);
-        term(d.line || '');
+        const line = d.line || '';
+        term(line);
+        syncChatWithLogLine(line);
       });
       eventSource.addEventListener('step_start', e => {
         const d = JSON.parse(e.data);
@@ -528,6 +1398,9 @@
       eventSource.addEventListener('tool_call', e => {
         const d = JSON.parse(e.data);
         term('>>> tool ' + (d.tool_id || ''));
+        if (d.tool_id === 'liara.deploy_service') {
+          syncChatWithLogLine('Starting Liara deploy (live output in terminal)…');
+        }
       });
       eventSource.addEventListener('agent_message', e => {
         const d = JSON.parse(e.data);
@@ -547,7 +1420,9 @@
       });
       eventSource.addEventListener('agent_thinking', e => {
         const d = JSON.parse(e.data);
-        setAgentThinking(d.text || '');
+        const text = d.text || '';
+        setAgentThinking(text);
+        if (text) syncChatWithLogLine(text);
       });
       eventSource.addEventListener('approval_required', e => {
         const d = JSON.parse(e.data);
@@ -564,33 +1439,49 @@
         const d = JSON.parse(e.data);
         if (d.site_url) showSite(d.site_url);
         const m = loadChatMemory();
-        if (d.summary && m.length) {
+        const summary = (d.summary || '').trim();
+        if (m.length) {
           const last = m[m.length - 1];
-          if (!last.streaming && (!last.assistant || last.assistant === 'Thinking…' || last.pending)) {
-            appendToLatestAssistant(d.summary);
+          const stuck =
+            last.pending ||
+            last.assistant === 'Thinking…' ||
+            !(last.assistant && last.assistant.trim());
+          if (summary && (stuck || !last.streaming)) {
+            if (last.pending || last.assistant === 'Thinking…' || !last.assistant?.trim()) {
+              finishChatTurn(summary, { agentLive: false });
+            } else if (!last.streaming) {
+              appendToLatestAssistant(summary);
+            }
+          } else if (last.pending && summary) {
+            finishChatTurn(summary, { agentLive: false });
+          } else if (last.pending) {
+            const partial = (last.assistant && last.assistant !== 'Thinking…') ? last.assistant : '';
+            if (partial) finishChatTurn(partial, { agentLive: false });
           }
         }
         agentStreamActive = false;
         agentThinkingText = '';
-        if (m.length) {
-          m[m.length - 1].agentLive = false;
-          m[m.length - 1].pending = false;
-          m[m.length - 1].streaming = false;
-          saveChatMemory(m);
+        const m2 = loadChatMemory();
+        if (m2.length) {
+          m2[m2.length - 1].agentLive = false;
+          m2[m2.length - 1].pending = false;
+          m2[m2.length - 1].streaming = false;
+          saveChatMemory(m2);
         }
-        document.getElementById('runState').textContent = 'succeeded';
+        term('— run succeeded —');
         renderChatThread();
         pollRun(runId);
       });
       eventSource.addEventListener('run_error', e => {
         try {
           const d = JSON.parse(e.data);
+          const errText = 'Run failed: ' + (d.message || 'unknown error');
           term('ERROR: ' + (d.message || ''));
-          appendToLatestAssistant('Run failed: ' + (d.message || 'unknown error'));
+          finishChatTurn(errText, { agentLive: false });
         } catch (_) {}
         agentStreamActive = false;
         agentThinkingText = '';
-        document.getElementById('runState').textContent = 'failed';
+        term('— run failed —');
         renderChatThread();
         pollRun(runId);
       });
@@ -622,44 +1513,38 @@
     async function pollRun(runId) {
       const res = await fetch('/runs/' + runId, { headers: { 'X-API-Key': apiKey() } });
       const run = await res.json();
-      document.getElementById('runState').textContent = run.state;
       if (run.site_url) showSite(run.site_url);
       const mem = loadChatMemory();
       const lastTurn = mem.length ? mem[mem.length - 1] : null;
       if (run.agent_message && !agentStreamActive && !(lastTurn && lastTurn.streaming)) {
         patchLatestAssistant(run.agent_message);
       }
+      if (run.state === 'executing' && lastTurn && lastTurn.pending && run.agent_message) {
+        const base = lastTurn.assistant === 'Thinking…' ? '' : lastTurn.assistant;
+        if (!base.includes(run.agent_message.slice(0, 40))) {
+          lastTurn.assistant = (base ? base + '\n\n' : '') + run.agent_message;
+          lastTurn.agentLive = true;
+          saveChatMemory(mem);
+          renderChatThread();
+        }
+      }
       if (run.state === 'awaiting_approval') {
         document.getElementById('approvalBar').style.display = 'block';
+      }
+      if (run.state === 'failed' && mem.length && mem[mem.length - 1].pending) {
+        finishChatTurn(run.error_message || run.result_summary || 'Run failed.', { agentLive: false });
+      }
+      if (run.state === 'succeeded' && mem.length && mem[mem.length - 1].pending) {
+        const doneText =
+          (run.result_summary || run.agent_message || '').trim() || 'Done.';
+        finishChatTurn(doneText, { agentLive: false });
+      }
+      if (run.state === 'cancelled' && mem.length && mem[mem.length - 1].pending) {
+        finishChatTurn(run.result_summary || run.error_message || 'Run cancelled.', { agentLive: false });
       }
       if (TERMINAL_RUN_STATES.has(run.state)) stopRunPolling();
       return run;
     }
-
-    document.getElementById('refreshBtn').onclick = loadRepos;
-    loadRepos();
-
-    document.getElementById('deployBtn').onclick = async () => {
-      const repo = document.getElementById('ghRepo').value;
-      if (!repo) return alert('Select a repository');
-      clearTerm();
-      document.getElementById('approvalBar').style.display = 'none';
-      document.getElementById('successBox').style.display = 'none';
-      const body = {
-        repo,
-        subpath: document.getElementById('ghSubpath').value.trim(),
-        liara_app_name: document.getElementById('liaraApp').value.trim() || null,
-      };
-      const res = await fetch('/runs/pipeline', { method: 'POST', headers: headers(), body: JSON.stringify(body) });
-      const run = await res.json();
-      currentRunId = run.id;
-      document.getElementById('runMeta').textContent = 'Run ' + run.id;
-      document.getElementById('runState').textContent = run.state;
-      term('Pipeline started for ' + repo);
-      connectStream(run.id);
-      startRunPolling(run.id);
-      setTimeout(() => pollRun(run.id), 1500);
-    };
 
     document.getElementById('approveBtn').onclick = async () => {
       if (!currentRunId) return;
@@ -667,7 +1552,7 @@
       term('— approved — continuing deploy…');
       const res = await fetch('/runs/' + currentRunId + '/approve', { method: 'POST', headers: { 'X-API-Key': apiKey() } });
       const run = await res.json();
-      document.getElementById('runState').textContent = run.state;
+      term('— state: ' + run.state + ' —');
       startRunPolling(currentRunId);
     };
 
@@ -692,17 +1577,24 @@
       const run = await res.json();
       if (!res.ok) {
         const err = typeof run.detail === 'string' ? run.detail : JSON.stringify(run.detail || run);
-        finishChatTurn('Something went wrong: ' + err);
+        finishChatTurn('Something went wrong: ' + err, { agentLive: false });
         term('Error: ' + err);
         return;
       }
       currentRunId = run.id;
       connectStream(run.id);
-      if (run.agent_message && !isStreamingSkill(run.skill_id)) {
+      if (run.agent_message && isStreamingSkill(run.skill_id)) {
+        const mem = loadChatMemory();
+        if (mem.length && mem[mem.length - 1].pending) {
+          mem[mem.length - 1].assistant = run.agent_message + '\n\nDeploy in progress…';
+          mem[mem.length - 1].agentLive = true;
+          saveChatMemory(mem);
+          renderChatThread();
+        }
+      } else if (run.agent_message && !isStreamingSkill(run.skill_id)) {
         finishChatTurn(run.agent_message, { durationMs: Date.now() - started, agentLive: true });
       }
-      term('Run ' + run.id + ' — ' + (run.skill_id || ''));
-      document.getElementById('runState').textContent = run.state;
+      term('Run ' + run.id + ' — ' + (run.skill_id || '') + ' — ' + run.state);
       document.getElementById('runMeta').textContent = 'Run ' + run.id;
       if (run.state === 'awaiting_approval') {
         document.getElementById('approvalBar').style.display = 'block';
@@ -724,6 +1616,83 @@
       chatPendingTurn = null;
       renderChatThread();
     };
+
+    (function initTerminalResize() {
+      const TERMINAL_HEIGHT_KEY = 'deployer_terminal_height_v2';
+      const VSCODE_DEFAULT_TERMINAL_PX = 340;
+      const panel = document.querySelector('.left-panel');
+      const wrap = document.getElementById('terminalWrap');
+      const handle = document.getElementById('terminalResizeHandle');
+      if (!panel || !wrap || !handle) return;
+
+      function topChromeHeight() {
+        const toolbar = panel.querySelector('.left-toolbar');
+        const banners = panel.querySelector('.left-banners');
+        const cursorMin = 200;
+        return (toolbar?.offsetHeight || 0) + (banners?.offsetHeight || 0) + cursorMin + 8;
+      }
+
+      function maxTerminalHeight() {
+        const handleH = handle.offsetHeight + 8;
+        return Math.max(120, panel.clientHeight - topChromeHeight() - handleH);
+      }
+
+      function applyTerminalHeight(px) {
+        const h = Math.min(maxTerminalHeight(), Math.max(120, px));
+        wrap.style.height = h + 'px';
+        return h;
+      }
+
+      const saved = parseInt(localStorage.getItem(TERMINAL_HEIGHT_KEY) || '', 10);
+      const defaultH = Math.min(VSCODE_DEFAULT_TERMINAL_PX, maxTerminalHeight());
+      applyTerminalHeight(saved >= 120 ? saved : defaultH);
+
+      window.addEventListener('resize', () => {
+        const current = wrap.getBoundingClientRect().height;
+        applyTerminalHeight(current);
+      });
+
+      function startDrag(clientY) {
+        const startY = clientY;
+        const startH = wrap.getBoundingClientRect().height;
+        handle.classList.add('is-dragging');
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'ns-resize';
+
+        function onMove(ev) {
+          const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
+          // Terminal is bottom-anchored: drag the top edge up to grow height.
+          applyTerminalHeight(startH + (startY - y));
+        }
+
+        function onUp() {
+          handle.classList.remove('is-dragging');
+          document.body.style.userSelect = '';
+          document.body.style.cursor = '';
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          document.removeEventListener('touchmove', onMove);
+          document.removeEventListener('touchend', onUp);
+          localStorage.setItem(TERMINAL_HEIGHT_KEY, String(Math.round(wrap.getBoundingClientRect().height)));
+        }
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('touchend', onUp);
+      }
+
+      handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        startDrag(e.clientY);
+      });
+      handle.addEventListener('touchstart', e => {
+        if (e.touches.length === 1) {
+          e.preventDefault();
+          startDrag(e.touches[0].clientY);
+        }
+      }, { passive: false });
+    })();
   </script>
 </body>
 </html>

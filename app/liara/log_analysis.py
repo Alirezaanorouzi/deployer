@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any
 
+from app.agent.language import prefers_persian
 from app.config import get_settings
 from app.diagnosis import _heuristic_diagnosis
 from app.llm.client import LlmNotConfiguredError, get_llm_client, llm_configured
@@ -36,6 +37,7 @@ async def analyze_service_logs(
     project_id: str,
     logs: str,
     user_focus: str | None = None,
+    user_goal: str | None = None,
 ) -> str:
     stats = _quick_stats(logs)
     excerpt = logs[-14000:] if len(logs) > 14000 else logs
@@ -45,12 +47,15 @@ async def analyze_service_logs(
 
     settings = get_settings()
     client = get_llm_client()
-    system = """You analyze Liara PaaS application logs for a DevOps agent.
-Logs are already redacted (no secrets). Respond in clear English (one short Persian line optional).
-Structure:
-1) **Summary** — what the service was doing / overall health from logs
-2) **Issues** — errors, warnings, 5xx, crashes, build/deploy failures (cite log patterns, not invented lines)
-3) **Recommended next steps** — concrete actions (redeploy, check env, scale, fix code)
+    lang_note = (
+        "Respond entirely in Persian (فارسی). Headings: **خلاصه**، **مشکلات**، **اقدام‌های پیشنهادی**."
+        if prefers_persian(user_goal or user_focus or "")
+        else (
+            "Respond in clear English. Structure: **Summary**, **Issues**, **Recommended next steps**."
+        )
+    )
+    system = f"""You analyze Liara PaaS application logs for a DevOps agent.
+Logs are already redacted (no secrets). {lang_note}
 Keep under 12 lines. Do not repeat the full log dump."""
 
     user = json.dumps(

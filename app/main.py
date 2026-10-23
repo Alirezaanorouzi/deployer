@@ -23,15 +23,47 @@ from app.liara.adapter import LiaraAdapter
 from app.models import Run, RunState
 from app.pipeline_planner import PIPELINE_SKILL
 from app.repo.analyzer import analyze_repository, open_deploy_pr
-from app.schemas import ChatRequest, PipelineStartRequest, Plan, RunOut, RunStepOut
+from app.cursor_agent.client import cursor_sdk_configured
+from app.cursor_agent.sessions import chat_turn, clear_session
+from app.schemas import (
+    ChatRequest,
+    CursorChatRequest,
+    CursorChatResponse,
+    TerminalLogResponse,
+    PipelineStartRequest,
+    Plan,
+    RunOut,
+    RunStepOut,
+)
 from app.streaming import sse_format, stream_bus
+
+
+def _resume_interrupted_react_runs() -> None:
+    """uvicorn --reload kills in-flight deploy jobs; continue them after restart."""
+    db = SessionLocal()
+    try:
+        runs = db.query(Run).filter(Run.state == RunState.executing).all()
+        for run in runs:
+            try:
+                ctx = json.loads(run.context_json or "{}")
+            except json.JSONDecodeError:
+                continue
+            if not ctx.get("react_mode"):
+                continue
+            asyncio.create_task(_react_agent_run(run.id))
+    finally:
+        db.close()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from app.llm.client import clear_llm_client_cache
+
+    clear_llm_client_cache()
     root = data_root()
     (root / "workspaces").mkdir(parents=True, exist_ok=True)
     init_db()
+    _resume_interrupted_react_runs()
     yield
 
 
@@ -208,7 +240,10 @@ async def run_stream(run_id: str):
     q = stream_bus.subscribe(run_id)
 
     async def event_generator():
+        from app.terminal_log import append
+
         try:
+            append(run_id, "— stream connected —")
             yield sse_format("connected", {"run_id": run_id})
             while True:
                 try:
@@ -249,6 +284,28 @@ async def chat(body: ChatRequest, background_tasks: BackgroundTasks, db: Session
         raise HTTPException(503, detail=str(e))
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            502,
+            detail="LLM returned invalid JSON. Check LLM_API_KEY, model name, and Box API quota; then restart the server.",
+        ) from e
+    except Exception as e:
+        msg = str(e).strip() or type(e).__name__
+        if "401" in msg or "unauthorized" in msg.lower():
+            raise HTTPException(502, detail="LLM API key rejected (401). Update LLM_API_KEY and restart uvicorn.") from e
+        if "429" in msg or "rate" in msg.lower() or "quota" in msg.lower():
+            raise HTTPException(502, detail=f"LLM rate limit or quota: {msg}") from e
+        if "timeout" in msg.lower() or type(e).__name__ in ("APITimeoutError", "ReadTimeout", "ConnectTimeout"):
+            raise HTTPException(
+                502,
+                detail="LLM request timed out. Check LLM_BASE_URL, model name, and network access to ai.liara.ir.",
+            ) from e
+        if "connection" in msg.lower() or type(e).__name__ == "APIConnectionError":
+            raise HTTPException(
+                502,
+                detail="Cannot reach LLM API (connection error). Verify LLM_BASE_URL and internet/VPN/firewall.",
+            ) from e
+        raise HTTPException(502, detail=f"Agent planner failed: {msg}") from e
 
     if run.skill_id == PIPELINE_SKILL:
         background_tasks.add_task(_pipeline_phase1, run.id)
@@ -264,6 +321,32 @@ async def get_run(run_id: str, db: Session = Depends(get_db)):
     run = db.get(Run, run_id)
     if not run:
         raise HTTPException(404, "Run not found")
+    return run_to_out(run)
+
+
+@app.post("/runs/{run_id}/cancel", response_model=RunOut, dependencies=[Depends(verify_api_key)])
+async def cancel_run(run_id: str, db: Session = Depends(get_db)):
+    """Mark a stuck run cancelled (in-flight CLI may still finish until timeout)."""
+    run = db.get(Run, run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.state in (RunState.succeeded, RunState.failed, RunState.cancelled):
+        return run_to_out(run)
+    try:
+        ctx = json.loads(run.context_json or "{}")
+    except json.JSONDecodeError:
+        ctx = {}
+    ctx["cancel_requested"] = True
+    run.context_json = json.dumps(ctx)
+    run.state = RunState.cancelled
+    run.error_message = "Cancelled by user"
+    run.result_summary = (
+        "Run cancelled. If Liara deploy was in progress, check the Liara console or wait for the CLI to time out, "
+        "then start a new chat deploy."
+    )
+    db.commit()
+    db.refresh(run)
+    await stream_bus.publish(run_id, "run_error", {"message": run.result_summary})
     return run_to_out(run)
 
 
@@ -303,6 +386,90 @@ async def github_repos():
         return {"repos": slim}
     except GitHubError as e:
         raise HTTPException(400, detail=str(e))
+
+
+@app.get("/terminal/log", response_model=TerminalLogResponse, dependencies=[Depends(verify_api_key)])
+async def terminal_log_api(
+    run_id: str | None = None,
+    db: Session = Depends(get_db),
+):
+    from app.terminal_log import get_terminal_log_text
+
+    text, line_count, truncated = get_terminal_log_text(run_id, db)
+    return TerminalLogResponse(
+        run_id=run_id,
+        text=text,
+        line_count=line_count,
+        truncated=truncated,
+    )
+
+
+@app.get("/cursor/status", dependencies=[Depends(verify_api_key)])
+async def cursor_status():
+    s = get_settings()
+    return {
+        "configured": cursor_sdk_configured(),
+        "model": s.cursor_sdk_model,
+        "runtime": (s.cursor_sdk_runtime or "cloud").strip().lower(),
+        "cloud_branch": s.cursor_cloud_branch,
+        "cloud_auto_pr": bool(s.cursor_cloud_auto_pr),
+    }
+
+
+@app.post("/cursor/chat/stream", dependencies=[Depends(verify_api_key)])
+async def cursor_chat_stream(body: CursorChatRequest, db: Session = Depends(get_db)):
+    if not cursor_sdk_configured():
+        raise HTTPException(503, detail="CURSOR_API_KEY is not set in .env")
+
+    from app.cursor_agent.stream_chat import stream_chat_events
+
+    async def event_generator():
+        yield sse_format("connected", {})
+        async for event, data in stream_chat_events(
+            body.message,
+            session_id=body.session_id,
+            run_id=body.run_id,
+            repo=body.repo,
+            deploy_log=body.deploy_log,
+            include_terminal_log=body.include_terminal_log,
+            db=db,
+        ):
+            yield sse_format(event, data)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/cursor/chat", response_model=CursorChatResponse, dependencies=[Depends(verify_api_key)])
+async def cursor_chat(body: CursorChatRequest, db: Session = Depends(get_db)):
+    if not cursor_sdk_configured():
+        raise HTTPException(503, detail="CURSOR_API_KEY is not set in .env")
+    data = await chat_turn(
+        body.message,
+        session_id=body.session_id,
+        run_id=body.run_id,
+        repo=body.repo,
+        deploy_log=body.deploy_log,
+        include_terminal_log=body.include_terminal_log,
+        db=db,
+    )
+    return CursorChatResponse(
+        ok=bool(data.get("ok")),
+        session_id=data.get("session_id") or "",
+        status=data.get("status") or "",
+        reply=data.get("reply") or "",
+        workspace=data.get("workspace") or "",
+        error=data.get("error"),
+    )
+
+
+@app.delete("/cursor/session/{session_id}", dependencies=[Depends(verify_api_key)])
+async def cursor_session_clear(session_id: str):
+    clear_session(session_id)
+    return {"ok": True}
 
 
 @app.get("/integrations/github/sample-analysis", dependencies=[Depends(verify_api_key)])

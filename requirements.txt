@@ -6,3 +6,4 @@ pydantic-settings>=2.6.0
 httpx>=0.28.0
 python-multipart>=0.0.17
 openai>=1.55.0
+cursor-sdk>=0.1.0

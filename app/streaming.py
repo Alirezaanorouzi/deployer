@@ -22,7 +22,12 @@ class RunStreamBus:
                 del self._queues[run_id]
 
     async def publish(self, run_id: str, event: str, data: dict[str, Any] | None = None) -> None:
+        from app.terminal_log import append, line_from_stream_event
+
         payload = {"event": event, "data": data or {}}
+        tline = line_from_stream_event(event, data or {})
+        if tline:
+            append(run_id, tline)
         for q in list(self._queues.get(run_id, [])):
             try:
                 q.put_nowait(payload)

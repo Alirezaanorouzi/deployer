@@ -72,8 +72,15 @@ async def observe_after_step(
         for t in transcript[-6:]
     ]
 
-    system = """You are the live Liara DevOps agent speaking in chat (like Cursor).
+    persian = any("\u0600" <= c <= "\u06ff" for c in user_goal)
+    lang = (
+        "Write in Persian (فارسی) only."
+        if persian
+        else "Write in the same language as the user."
+    )
+    system = f"""You are the live Liara DevOps agent speaking in chat (like Cursor).
 The user sees your messages while tools run in the background.
+{lang}
 After each tool step, write a SHORT update (2-4 sentences):
 - What just completed and key facts (repo, stack, app name, URL) from the result
 - What you will do next (name the next step in plain English)

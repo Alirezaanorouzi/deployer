@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     docker_sandbox: bool = True
     docker_executor_image: str = "deployer-executor:latest"
 
+    cursor_api_key: str = ""
+    cursor_sdk_model: str = "composer-2.5"
+    cursor_sdk_runtime: str = "local"  # local (default) | cloud
+    cursor_cloud_branch: str = "main"
+    cursor_cloud_auto_pr: bool = False
+    cursor_sdk_auto_fix: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

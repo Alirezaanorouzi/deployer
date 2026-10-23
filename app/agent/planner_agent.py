@@ -3,8 +3,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.config import get_settings
+from app.llm.chat_json import chat_json_object
 from app.llm.client import get_llm_client
 from app.pipeline_planner import PIPELINE_SKILL
+from app.agent.conversation_params import (
+    apply_confirm_from_conversation,
+    enrich_planner_params,
+    is_advisory_followup,
+)
+from app.agent.deploy_params import enrich_deploy_params
 from app.repo.paths import normalize_github_repo
 
 
@@ -23,10 +30,11 @@ ALLOWED_SKILLS = [
     "liara.settings",
     "liara.resize",
     "agent.summarize",
+    "agent.chat",
     "incident.diagnose",
 ]
 
-# Skills executed via tool registry + ReAct loop (plan → tool → evaluate → replan).
+# Skills executed via tool registry + LLM-first ReAct loop (plan_next_step).
 REACT_SKILLS = frozenset(
     {
         "liara.balance",
@@ -39,7 +47,9 @@ REACT_SKILLS = frozenset(
         "liara.settings",
         "liara.resize",
         "liara.deploy",
+        "liara.bootstrap",
         "agent.summarize",
+        "agent.chat",
     }
 )
 
@@ -63,7 +73,7 @@ def _apply_skill_overrides(
     skill_id: str,
     conversation_history: list[dict[str, str]] | None,
 ) -> str:
-    """Deterministic fixes when the LLM picks the wrong skill."""
+    """Minimal harness — skill choice is LLM-first; step tools use plan_next_step."""
     m = user_message.lower()
     hist = conversation_history or []
     recap_words = (
@@ -79,15 +89,14 @@ def _apply_skill_overrides(
     )
     if hist and any(w in m for w in recap_words):
         return "agent.summarize"
-    persian = user_message  # keep Persian script for keyword checks
-    slow_markers = ("کند", "کندی", "slow", "slowness", "latency")
-    log_markers = ("لاگ", "log", "خطا", "error")
-    if any(x in persian for x in log_markers) and any(x in persian for x in slow_markers):
-        return "incident.diagnose"
-    if any(x in m for x in ("slow", "slowness", "laggy")) and any(
-        x in m for x in ("log", "logs", "error")
-    ):
-        return "incident.diagnose"
+    from app.agent.orchestrator import is_chat_only
+
+    if is_chat_only(user_message):
+        return "agent.chat"
+    if is_advisory_followup(user_message, hist):
+        return "agent.chat"
+    if skill_id not in ALLOWED_SKILLS:
+        return "agent.chat"
     return skill_id
 
 
@@ -97,8 +106,9 @@ def _apply_pipeline_repo_params(
     params: dict[str, Any],
     github_repos: list[str] | None,
 ) -> None:
-    if skill_id not in (PIPELINE_SKILL, "liara.deploy"):
+    if skill_id not in (PIPELINE_SKILL, "liara.deploy", "liara.bootstrap"):
         return
+    enrich_deploy_params(user_message, params, github_repos)
     if github_repos:
         params.setdefault("github_repos", github_repos[:25])
     repos = github_repos or []
@@ -118,29 +128,6 @@ def _apply_pipeline_repo_params(
             pass
     if not params.get("liara_app_name") and params.get("repo"):
         params.setdefault("liara_app_name", params["repo"].split("/")[-1])
-
-
-def _apply_confirm_write(user_message: str, params: dict[str, Any]) -> None:
-    """When the user clearly approves a pending write, allow tools to proceed."""
-    m = user_message.lower().strip()
-    affirm = (
-        "yes,",
-        "yes ",
-        "confirm",
-        "approved",
-        "go ahead",
-        "do it",
-        "please do",
-        "تایید",
-        "بله",
-        "انجام بده",
-        "اوکی",
-    )
-    deploy_intent = any(
-        x in m for x in ("deploy", "publish", "release", "دیپلوی", "منتشر", "لیارا")
-    )
-    if any(a in m for a in affirm) and not deploy_intent:
-        params["confirm_write"] = True
 
 
 async def plan_with_agent(
@@ -221,7 +208,9 @@ Rules:
 - Prefer liara.deploy in chat for "deploy / publish / go live on Liara". Set params.repo to owner/name (e.g. Alirezaanorouzi/deployer) and params.liara_app_name or app_name.
 - Use pipeline.github_to_liara only when the user explicitly wants the left-panel pipeline with Approve & continue (legacy UI flow).
 - For this deployer FastAPI repo on GitHub, use repo Alirezaanorouzi/deployer — not a bare name deployer.
+- Use agent.chat for greetings, thanks, or advisory follow-ups ("what should I do now?") using conversation context — no Liara API tools.
 - Use agent.summarize when the user asks for a conclusion, recap, or summary of what was already discussed in chat (no new API calls).
+- Use liara.bootstrap for first-time setup / plan advice without an immediate deploy.
 - Use incident.diagnose when the user reports slowness AND wants logs checked, or a broad outage (health + metrics + logs + analysis). Always set params.app_name to the Liara project id.
 - Prefer liara.logs when the user only wants logs without performance investigation.
 - Use liara.health / liara.deploy / liara.bootstrap appropriately.
@@ -240,21 +229,11 @@ Rules:
 
     messages.append({"role": "user", "content": user})
 
-    kwargs: dict = {
-        "model": settings.llm_model,
-        "messages": messages,
-        "response_format": {"type": "json_object"},
-    }
-    # Some providers (e.g. Box API) only support default temperature.
-    if "boxapi" not in settings.llm_base_url.lower():
-        kwargs["temperature"] = 0.1
-    resp = await client.chat.completions.create(**kwargs)
-    raw = (resp.choices[0].message.content or "{}").strip()
-    data = json.loads(raw)
+    data = await chat_json_object(client, settings, messages=messages, temperature=0.1)
 
-    skill_id = data.get("skill_id", "liara.health")
+    skill_id = data.get("skill_id", "agent.chat")
     if skill_id not in ALLOWED_SKILLS:
-        skill_id = "liara.health"
+        skill_id = "agent.chat"
 
     skill_id = _apply_skill_overrides(user_message, skill_id, conversation_history)
 
@@ -267,9 +246,21 @@ Rules:
     if health_url:
         params.setdefault("health_url", health_url)
 
-    _apply_confirm_write(user_message, params)
+    enrich_planner_params(
+        skill_id,
+        user_message,
+        params,
+        conversation_history=conversation_history,
+        liara_projects=liara_projects,
+        github_repos=github_repos,
+        default_app=app,
+    )
+    apply_confirm_from_conversation(
+        user_message,
+        params,
+        conversation_history=conversation_history,
+    )
     if skill_id == "liara.deploy":
-        # User asked to deploy/publish — same run may create app and upload code.
         params["confirm_write"] = True
 
     return AgentDecision(

@@ -5,5 +5,12 @@
   "args": ["python main.py"],
   "python": {
     "version": "3.12"
-  }
+  },
+  "disks": [
+    {
+      "name": "data",
+      "mountTo": "data",
+      "size": 5
+    }
+  ]
 }

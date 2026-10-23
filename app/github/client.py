@@ -59,6 +59,45 @@ class GitHubClient:
         data = await self._request("GET", f"/repos/{owner}/{repo}")
         return data.get("default_branch", "main")
 
+    async def list_directory(
+        self,
+        owner: str,
+        repo: str,
+        path: str = "",
+        ref: str | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """One directory level via Contents API (for file explorer)."""
+        branch = ref or await self.get_default_branch(owner, repo)
+        path_clean = path.strip().strip("/")
+        if path_clean:
+            endpoint = f"/repos/{owner}/{repo}/contents/{path_clean}?ref={branch}"
+        else:
+            endpoint = f"/repos/{owner}/{repo}/contents?ref={branch}"
+        data = await self._request("GET", endpoint)
+        if isinstance(data, dict):
+            entry_type = "dir" if data.get("type") == "dir" else "file"
+            return branch, [
+                {
+                    "name": data.get("name", ""),
+                    "path": data.get("path", path_clean),
+                    "type": entry_type,
+                    "size": data.get("size", 0),
+                }
+            ]
+        entries: list[dict[str, Any]] = []
+        for item in data if isinstance(data, list) else []:
+            entry_type = "dir" if item.get("type") == "dir" else "file"
+            entries.append(
+                {
+                    "name": item.get("name", ""),
+                    "path": item.get("path", ""),
+                    "type": entry_type,
+                    "size": item.get("size", 0),
+                }
+            )
+        entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, (e.get("name") or "").lower()))
+        return branch, entries
+
     async def create_branch(self, owner: str, repo: str, branch: str, from_sha: str) -> None:
         await self._request(
             "POST",

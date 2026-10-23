@@ -44,7 +44,7 @@ def _skill_hint(skill_id: str) -> str:
         "liara.balance": "account balance credit remaining",
         "liara.usage": "cpu memory resource usage metrics service",
         "liara.deploy": "deploy",
-        "liara.bootstrap": "bootstrap setup",
+        "liara.bootstrap": "bootstrap setup recommend plan deployment method",
         "liara.health": "health status",
         "liara.logs": "logs",
         "liara.events": "platform events activity",
