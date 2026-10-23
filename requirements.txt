@@ -1,9 +1,9 @@
 # Liara production: install from vendored Linux wheels (no platform PyPI mirror).
-# Do NOT use `-r other.txt` here — Liara's build may not ship nested requirement files.
+# Use absolute file:// path — relative ./wheels is ignored by pip on Liara's build image.
 # Refresh wheels: .venv\Scripts\python scripts/refresh_liara_wheels.py
 # Local Windows/dev: requirements-dev.txt
 --no-index
---find-links=./wheels
+--find-links=file:///usr/src/app/wheels
 fastapi==0.161.1
 uvicorn==0.54.0
 sqlalchemy==2.0.36
