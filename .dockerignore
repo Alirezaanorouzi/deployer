@@ -1,0 +1,17 @@
+.venv
+venv
+.git
+.cursor
+__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+data
+*.db
+.pytest_cache
+docker
+docs
+agent-transcripts
+*.md
+!wheels/README.md

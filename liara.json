@@ -1,11 +1,7 @@
 {
-  "platform": "python",
+  "platform": "docker",
   "app": "deployer",
   "port": 8000,
-  "args": ["python main.py"],
-  "python": {
-    "version": "3.12"
-  },
   "disks": [
     {
       "name": "data",

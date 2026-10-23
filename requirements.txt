@@ -1,9 +1,5 @@
-# Liara production: install from vendored Linux wheels (no platform PyPI mirror).
-# Use absolute file:// path — relative ./wheels is ignored by pip on Liara's build image.
-# Refresh wheels: .venv\Scripts\python scripts/refresh_liara_wheels.py
-# Local Windows/dev: requirements-dev.txt
---no-index
---find-links=file:///usr/src/app/wheels
+# Package pins for tools/docs. Liara Docker builds install from requirements-base.txt + wheels/ (see Dockerfile).
+# Local Windows/dev: use requirements-dev.txt
 fastapi==0.161.1
 uvicorn==0.54.0
 sqlalchemy==2.0.36
