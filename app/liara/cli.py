@@ -148,7 +148,11 @@ class LiaraCli:
                     if deploy_tail and deploy_tail.on_line(line):
                         proc.terminate()
                         break
-            await asyncio.wait_for(proc.wait(), timeout=30)
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                await asyncio.wait_for(proc.wait(), timeout=remaining)
+            else:
+                raise asyncio.TimeoutError
         except asyncio.TimeoutError:
             proc.kill()
             return CliResult(124, "".join(stdout_parts), "BUILD_TIMEOUT: command exceeded timeout")
@@ -229,11 +233,19 @@ class LiaraCli:
             if timed_out:
                 proc.kill()
             else:
-                try:
-                    await asyncio.wait_for(loop.run_in_executor(None, proc.wait), timeout=60)
-                except asyncio.TimeoutError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     proc.kill()
                     timed_out = True
+                else:
+                    try:
+                        await asyncio.wait_for(
+                            loop.run_in_executor(None, proc.wait),
+                            timeout=remaining,
+                        )
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                        timed_out = True
 
         if read_err and not chunks:
             return CliResult(127, "", f"CLI subprocess error: {read_err[0]}")
